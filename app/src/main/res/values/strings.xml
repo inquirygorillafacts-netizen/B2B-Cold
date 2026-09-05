@@ -1,0 +1,19 @@
+<resources>
+    <string name="app_name">B2B Client Connect</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_call_log">Call Log</string>
+    <string name="tab_contacts">Contacts</string>
+    <string name="tab_profile">Profile</string>
+    <string name="permission_required_title">Permissions Required</string>
+    <string name="permission_required_desc">To access your client contacts, call history, direct calling, and voice note recordings, please grant the required permissions.</string>
+    <string name="grant_permissions">Grant Permissions</string>
+    <string name="search_contacts_hint">Search client name, company, or number…</string>
+    <string name="call_log_empty">No call records found</string>
+    <string name="contacts_empty">No client contacts found</string>
+    <string name="filter_all">All</string>
+    <string name="filter_missed">Missed</string>
+    <string name="filter_incoming">Incoming</string>
+    <string name="filter_outgoing">Outgoing</string>
+    <string name="dial_placeholder">Enter number</string>
+</resources>
+
