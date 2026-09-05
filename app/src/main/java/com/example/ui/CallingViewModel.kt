@@ -29,8 +29,13 @@ import kotlin.random.Random
 
 data class PermissionState(
     val hasContacts: Boolean = false,
-    val hasRecordAudio: Boolean = false
-)
+    val hasRecordAudio: Boolean = false,
+    val hasCallLog: Boolean = false,
+    val hasCallPhone: Boolean = false
+) {
+    val allGranted: Boolean
+        get() = hasContacts && hasRecordAudio && hasCallLog && hasCallPhone
+}
 
 data class SyncProgressState(
     val isSyncing: Boolean = false,
@@ -48,12 +53,20 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     private val _permissionState = MutableStateFlow(
         PermissionState(
             hasContacts = contactsRepo.hasContactsPermission(),
-            hasRecordAudio = false
+            hasRecordAudio = androidx.core.content.ContextCompat.checkSelfPermission(
+                application,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED,
+            hasCallLog = com.example.util.CallLogHelper.hasCallLogPermission(application),
+            hasCallPhone = androidx.core.content.ContextCompat.checkSelfPermission(
+                application,
+                android.Manifest.permission.CALL_PHONE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         )
     )
     val permissionState: StateFlow<PermissionState> = _permissionState.asStateFlow()
 
-    private val _userProfile = MutableStateFlow(UserProfileData())
+    private val _userProfile = MutableStateFlow(clientRepo.getUserProfileData())
     val userProfile: StateFlow<UserProfileData> = _userProfile.asStateFlow()
 
     // Real-time animated sync progress state
@@ -95,8 +108,8 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    // 5-Slide Onboarding State
-    private val _hasCompletedOnboarding = MutableStateFlow(false)
+    // 5-Slide Onboarding State (Persisted in SharedPreferences so it shows only once)
+    private val _hasCompletedOnboarding = MutableStateFlow(clientRepo.hasCompletedOnboarding())
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
     // Dedicated Settings Page State (Full Screen Navigation)
@@ -140,10 +153,16 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     private fun initializeData() {
         viewModelScope.launch {
             try {
+                // Ensure initial seed if database is empty
+                clientRepo.ensureInitialData()
+
                 if (contactsRepo.hasContactsPermission()) {
-                    clientRepo.syncDeviceContacts(force = true)
-                } else {
-                    clientRepo.ensureInitialData()
+                    // 10-Minute Cooldown Rule: Only auto-sync on app open if >= 10 minutes have passed
+                    if (clientRepo.shouldAutoSyncOnAppOpen()) {
+                        clientRepo.syncDeviceContacts(force = false)
+                    }
+                    // Refresh touchpoints from call history in background
+                    clientRepo.syncCallHistoryTouchpoints()
                 }
                 _lastSyncTimeString.value = clientRepo.getLastSyncTimeString()
             } catch (e: Exception) {
@@ -236,7 +255,8 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
             }
             val next = eligible.randomOrNull() ?: pool.first()
             _currentRandomClient.value = next
-            loadVoiceNotesForClient(next.id)
+            loadVoiceNotesForClient(next)
+            checkClientCallLogInstant(next)
         } else {
             _currentRandomClient.value = null
             _currentClientVoiceNotes.value = emptyList()
@@ -247,13 +267,31 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
         if (list.isNotEmpty()) {
             val client = list[Random.nextInt(list.size)]
             _currentRandomClient.value = client
-            loadVoiceNotesForClient(client.id)
+            loadVoiceNotesForClient(client)
+            checkClientCallLogInstant(client)
         }
     }
 
-    private fun loadVoiceNotesForClient(clientId: String) {
+    private fun checkClientCallLogInstant(client: ClientEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val logTs = com.example.util.CallLogHelper.getLastCallTimestamp(getApplication(), client.number)
+                if (logTs != null && logTs > client.lastContactedTimestamp) {
+                    clientRepo.updateLastContacted(client.id, logTs)
+                    if (_currentRandomClient.value?.id == client.id) {
+                        _currentRandomClient.value = _currentRandomClient.value?.copy(lastContactedTimestamp = logTs)
+                    }
+                }
+            } catch (e: Exception) {
+                // non-blocking
+            }
+        }
+    }
+
+    private fun loadVoiceNotesForClient(client: ClientEntity) {
         viewModelScope.launch {
-            clientRepo.getVoiceNotesForClient(clientId).collect { notes ->
+            clientRepo.syncDiskVoiceNotesForClient(client.id)
+            clientRepo.getVoiceNotesForClient(client.id).collect { notes ->
                 _currentClientVoiceNotes.value = notes
             }
         }
@@ -303,8 +341,9 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     fun recordClientContacted(clientId: String) {
         viewModelScope.launch {
             clientRepo.updateLastContacted(clientId, System.currentTimeMillis())
+            val newCount = clientRepo.incrementCallsMadeToday()
             _userProfile.value = _userProfile.value.copy(
-                callsMadeToday = _userProfile.value.callsMadeToday + 1
+                callsMadeToday = newCount
             )
         }
     }
@@ -324,7 +363,8 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
 
     // Audio Recording
     fun startRecordingVoiceNote(): Boolean {
-        return audioManager.startRecording()
+        val currentNum = _currentRandomClient.value?.number ?: ""
+        return audioManager.startRecording(currentNum)
     }
 
     fun stopRecordingVoiceNote(clientId: String, summary: String = "") {
@@ -372,13 +412,40 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updatePermissions(hasContacts: Boolean, hasRecordAudio: Boolean) {
+    fun updatePermissions(
+        hasContacts: Boolean,
+        hasRecordAudio: Boolean,
+        hasCallLog: Boolean = false,
+        hasCallPhone: Boolean = false
+    ) {
         _permissionState.value = PermissionState(
             hasContacts = hasContacts,
-            hasRecordAudio = hasRecordAudio
+            hasRecordAudio = hasRecordAudio,
+            hasCallLog = hasCallLog,
+            hasCallPhone = hasCallPhone
         )
-        if (hasContacts) {
-            syncContactsNow()
+    }
+
+    /**
+     * Called when user grants permissions in the gatekeeper screen for the very first time.
+     */
+    fun syncContactsOnFirstGrant() {
+        syncContactsNow()
+    }
+
+    /**
+     * Non-blocking call log update when returning to app from a phone call or WhatsApp.
+     * Absolutely NO full contacts sync or intrusive loading dialog is shown.
+     */
+    fun checkRecentCallLogsOnResume() {
+        viewModelScope.launch {
+            try {
+                if (com.example.util.CallLogHelper.hasCallLogPermission(getApplication())) {
+                    clientRepo.syncCallHistoryTouchpoints()
+                }
+            } catch (e: Exception) {
+                // non-blocking
+            }
         }
     }
 
@@ -387,10 +454,12 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun completeOnboarding() {
+        clientRepo.setCompletedOnboarding(true)
         _hasCompletedOnboarding.value = true
     }
 
     fun resetOnboarding() {
+        clientRepo.setCompletedOnboarding(false)
         _hasCompletedOnboarding.value = false
     }
 
@@ -403,6 +472,7 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setDailyCallGoal(goal: Int) {
+        clientRepo.setDailyCallGoal(goal)
         _userProfile.value = _userProfile.value.copy(dailyCallGoal = goal)
     }
 

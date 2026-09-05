@@ -157,13 +157,24 @@ class VoiceAudioManager(private val context: Context) {
         _playbackState.value = PlaybackState()
     }
 
-    fun startRecording(): Boolean {
-        stopPlayback()
-        try {
-            val voiceDir = File(context.filesDir, "voice_notes").apply { mkdirs() }
-            val file = File(voiceDir, "vn_${System.currentTimeMillis()}.m4a")
-            currentRecordingFile = file
+    companion object {
+        fun getAppRecordingsDirectory(context: Context): File {
+            val base = context.getExternalFilesDir(null) ?: context.filesDir
+            return File(base, "B2B_ColdCaller_Recordings").apply { mkdirs() }
+        }
+    }
 
+    fun startRecording(clientNumber: String = ""): Boolean {
+        stopPlayback()
+        val cleanNumber = clientNumber.replace(Regex("[^0-9]"), "").let {
+            if (it.length > 10) it.takeLast(10) else it
+        }.ifBlank { "unknown" }
+
+        val voiceDir = getAppRecordingsDirectory(context)
+        val file = File(voiceDir, "rec_${cleanNumber}_${System.currentTimeMillis()}.m4a")
+        currentRecordingFile = file
+
+        try {
             val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(context)
             } else {
@@ -200,10 +211,7 @@ class VoiceAudioManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("VoiceAudioManager", "Failed to start audio recording: ${e.message}")
             // Fallback for emulator without hardware mic: simulate recording
-            val voiceDir = File(context.filesDir, "voice_notes").apply { mkdirs() }
-            val file = File(voiceDir, "demo_vn_${System.currentTimeMillis()}.m4a")
             file.writeText("simulated_voice_note")
-            currentRecordingFile = file
 
             _recordingState.value = RecordingState(
                 isRecording = true,

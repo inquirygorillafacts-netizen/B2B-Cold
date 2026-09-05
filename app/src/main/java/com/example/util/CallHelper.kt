@@ -109,7 +109,7 @@ object CallHelper {
     }
 
     fun formatDaysAgo(timestamp: Long): String {
-        if (timestamp <= 0L) return "Never contacted"
+        if (timestamp <= 0L) return "No prior call"
         val now = System.currentTimeMillis()
         val diffMs = now - timestamp
         if (diffMs < 0L) return "Today"
@@ -122,6 +122,19 @@ object CallHelper {
             days < 30 -> "$days days ago"
             days < 365 -> "${days / 30} mo ago"
             else -> "${days / 365} yr ago"
+        }
+    }
+
+    fun formatDisplayNumber(rawNumber: String): String {
+        val trimmed = rawNumber.trim()
+        val digits = trimmed.replace(Regex("[^0-9]"), "")
+        return when {
+            digits.length == 10 -> "+91 ${digits.substring(0, 5)} ${digits.substring(5)}"
+            digits.length == 12 && digits.startsWith("91") -> "+91 ${digits.substring(2, 7)} ${digits.substring(7)}"
+            digits.length == 11 && digits.startsWith("0") -> "+91 ${digits.substring(1, 6)} ${digits.substring(6)}"
+            trimmed.startsWith("+") -> trimmed
+            digits.isNotBlank() -> "+91 $digits"
+            else -> trimmed
         }
     }
 

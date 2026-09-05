@@ -1,5 +1,5 @@
 {
-  "name": "B2B Client Connect",
+  "name": "B2B Cold",
   "description": "B2B client relationship and networking app with random client cards, voice notes, and quick action dialer.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

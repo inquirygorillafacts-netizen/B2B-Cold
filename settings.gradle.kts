@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "B2B Client Connect"
+rootProject.name = "B2B Cold"
 
 include(":app")

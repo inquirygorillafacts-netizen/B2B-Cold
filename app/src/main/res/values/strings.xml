@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">B2B Client Connect</string>
+    <string name="app_name">B2B Cold</string>
     <string name="tab_home">Home</string>
     <string name="tab_call_log">Call Log</string>
     <string name="tab_contacts">Contacts</string>

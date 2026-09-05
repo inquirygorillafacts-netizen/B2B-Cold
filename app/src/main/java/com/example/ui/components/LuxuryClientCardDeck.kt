@@ -57,6 +57,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -693,7 +694,7 @@ fun LuxuryBottomDock(
                 }
             }
 
-            // 3. WhatsApp Button (Exact WhatsApp chat dots icon)
+            // 3. WhatsApp Button (Authentic WhatsApp icon matching Image 5)
             Surface(
                 shape = CircleShape,
                 color = Color(0xFF25D366),
@@ -706,9 +707,9 @@ fun LuxuryBottomDock(
             ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Image(
-                        painter = painterResource(id = R.drawable.ic_chat_dots_whatsapp),
+                        painter = painterResource(id = R.drawable.ic_whatsapp_official),
                         contentDescription = "WhatsApp",
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -757,12 +758,23 @@ fun RomanticCardSurface(
     isInteractive: Boolean
 ) {
     val context = LocalContext.current
-    val effectiveLastContacted = remember(client.id, client.lastContactedTimestamp) {
-        val logTs = CallLogHelper.getLastCallTimestamp(context, client.number)
-        if (logTs != null && logTs > client.lastContactedTimestamp) {
-            logTs
-        } else {
-            client.lastContactedTimestamp
+    var dynamicLogTimestamp by remember(client.id) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(client.id, client.number) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val ts = CallLogHelper.getLastCallTimestamp(context, client.number)
+            if (ts != null) {
+                dynamicLogTimestamp = ts
+            }
+        }
+    }
+    val effectiveLastContacted = remember(client.id, client.lastContactedTimestamp, dynamicLogTimestamp) {
+        val dbTs = client.lastContactedTimestamp
+        val logTs = dynamicLogTimestamp ?: CallLogHelper.getLastCallTimestamp(context, client.number)
+        when {
+            logTs != null && logTs > dbTs -> logTs
+            dbTs > 0L -> dbTs
+            logTs != null -> logTs
+            else -> 0L
         }
     }
     val daysAgo = CallHelper.formatDaysAgo(effectiveLastContacted)
@@ -786,23 +798,41 @@ fun RomanticCardSurface(
         modifier = Modifier
             .fillMaxSize()
             .shadow(
-                elevation = 6.dp,
-                shape = RoundedCornerShape(28.dp),
-                ambientColor = Color(0x140F172A),
-                spotColor = Color(0x1A0F172A)
+                elevation = 10.dp,
+                shape = RoundedCornerShape(36.dp),
+                ambientColor = Color(0x180F172A),
+                spotColor = Color(0x1F0F172A)
             )
-            .clip(RoundedCornerShape(28.dp))
+            .clip(RoundedCornerShape(36.dp))
+            .border(
+                border = BorderStroke(1.5.dp, Color.White),
+                shape = RoundedCornerShape(36.dp)
+            )
             .testTag("luxury_card_${client.id}"),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 22.dp, vertical = 22.dp),
-            verticalArrangement = Arrangement.SpaceBetween
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFFFFFFFF),
+                            Color(0xFFFFFFFF),
+                            Color(0xFFF1FAFC),
+                            Color(0xFFDBF3F8),
+                            Color(0xFFC7ECF4)
+                        )
+                    )
+                )
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 22.dp, vertical = 22.dp),
+                verticalArrangement = Arrangement.SpaceBetween
+            ) {
             // TOP ROW: SQUIRCLE EMERALD AVATAR + VIP RELATIONSHIP BADGE
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -900,7 +930,7 @@ fun RomanticCardSurface(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "+91 ${client.number}",
+                            text = CallHelper.formatDisplayNumber(client.number),
                             fontSize = 14.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = Color(0xFF1E293B)
@@ -958,9 +988,10 @@ fun RomanticCardSurface(
 
                     // Right: TOUCHPOINT STATUS
                     val statusText = when {
-                        effectiveLastContacted <= 0L -> "Never Contacted"
-                        (System.currentTimeMillis() - effectiveLastContacted) > 7 * 24 * 3600 * 1000L -> "Overdue (>7d)"
-                        else -> "Recently Reached"
+                        effectiveLastContacted <= 0L -> "No prior call"
+                        (System.currentTimeMillis() - effectiveLastContacted) <= 24 * 3600 * 1000L -> "Connected Today"
+                        (System.currentTimeMillis() - effectiveLastContacted) <= 7 * 24 * 3600 * 1000L -> "Active ($daysAgo)"
+                        else -> "Overdue ($daysAgo)"
                     }
                     val statusColor = when {
                         effectiveLastContacted <= 0L -> Color(0xFF64748B)
@@ -1059,4 +1090,5 @@ fun RomanticCardSurface(
             }
         }
     }
+}
 }

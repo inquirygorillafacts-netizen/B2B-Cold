@@ -116,19 +116,23 @@ fun TenMillionClientDeckApp(
         if (pool.isNotEmpty()) pool.first() else null
     }
 
-    // Primary permission launcher for contacts, audio & direct calling
+    // Primary permission launcher for contacts, audio, call log & direct calling
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
         hasAttemptedPermissionRequest = true
         val contactsGranted = perms[Manifest.permission.READ_CONTACTS] == true
         val audioGranted = perms[Manifest.permission.RECORD_AUDIO] == true
+        val callLogGranted = perms[Manifest.permission.READ_CALL_LOG] == true
+        val callPhoneGranted = perms[Manifest.permission.CALL_PHONE] == true
         viewModel.updatePermissions(
             hasContacts = contactsGranted,
-            hasRecordAudio = audioGranted
+            hasRecordAudio = audioGranted,
+            hasCallLog = callLogGranted,
+            hasCallPhone = callPhoneGranted
         )
         if (contactsGranted) {
-            viewModel.syncContactsNow()
+            viewModel.syncContactsOnFirstGrant()
         }
     }
 
@@ -137,13 +141,15 @@ fun TenMillionClientDeckApp(
         permissionLauncher.launch(
             arrayOf(
                 Manifest.permission.READ_CONTACTS,
+                Manifest.permission.READ_CALL_LOG,
                 Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.CALL_PHONE
             )
         )
     }
 
-    // Re-check permissions on resume (e.g. when user returns from Device Settings)
+    // Re-check permissions and silently refresh call history touchpoints on resume
+    // NEVER re-triggers full contacts sync or displays sync dialog on resume
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
@@ -155,11 +161,24 @@ fun TenMillionClientDeckApp(
                     context,
                     Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
+                val hasCallLog = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_CALL_LOG
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasCallPhone = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.CALL_PHONE
+                ) == PackageManager.PERMISSION_GRANTED
 
                 viewModel.updatePermissions(
                     hasContacts = hasContacts,
-                    hasRecordAudio = hasAudio
+                    hasRecordAudio = hasAudio,
+                    hasCallLog = hasCallLog,
+                    hasCallPhone = hasCallPhone
                 )
+
+                // Ultra-lightweight background touchpoint refresh without blocking UI
+                viewModel.checkRecentCallLogsOnResume()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -191,9 +210,10 @@ fun TenMillionClientDeckApp(
             return@Box
         }
 
-        // STEP 2: Contacts Permission Gatekeeper Screen (Zero bypass without contacts permission)
-        if (!permissionState.hasContacts) {
+        // STEP 2: Mandatory Permissions Gatekeeper Screen (Zero bypass without ALL 4 permissions)
+        if (!permissionState.allGranted) {
             ContactsPermissionGateScreen(
+                permissionState = permissionState,
                 hasAskedPermission = hasAttemptedPermissionRequest,
                 onRequestPermission = { requestRequiredPermissions() }
             )
@@ -240,13 +260,11 @@ fun TenMillionClientDeckApp(
                     viewModel.closeSettingsScreen()
                 }
             )
-            return@Box
-        }
-
-        // STEP 4: Pure Clean Card Deck Screen (No Navigation Bar, Open & Spacious Canvas)
-        Scaffold(
+        } else {
+            // STEP 4: Pure Clean Card Deck Screen (No Navigation Bar, Open & Spacious Canvas)
+            Scaffold(
             modifier = Modifier.fillMaxSize(),
-            containerColor = Color(0xFFF8FAFC),
+            containerColor = Color(0xFFF4F5F7),
             topBar = {
                 // Minimal Header: Remaining Calls Badge + Quick Subscription Pill + Settings Studio
                 LuxuryExecutiveHeader(
@@ -274,9 +292,9 @@ fun TenMillionClientDeckApp(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xFFF8FAFC),
-                                Color(0xFFF1F5F9),
-                                Color(0xFFE2E8F0)
+                                Color(0xFFF4F5F7),
+                                Color(0xFFEDEFF3),
+                                Color(0xFFE5E8ED)
                             )
                         )
                     )
@@ -330,6 +348,7 @@ fun TenMillionClientDeckApp(
                 )
             }
         }
+    }
 
         // STEP 5: PayU Subscription Payment Sheet (₹49, ₹199 Popular, ₹499)
         if (showPayUSheet) {

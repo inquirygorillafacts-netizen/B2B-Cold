@@ -25,10 +25,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Done
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -38,10 +40,13 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
@@ -78,6 +83,12 @@ import com.example.ui.theme.LuxuryTextMuted
 import com.example.ui.theme.LuxuryTextPrimary
 import com.example.ui.theme.LuxuryTextSecondary
 
+enum class ContactFilterOption(val label: String) {
+    ALL("All Contacts"),
+    SELECTED("Selected"),
+    UNSELECTED("Unselected")
+}
+
 @Composable
 fun LuxurySettingsScreen(
     dailyGoal: Int,
@@ -102,22 +113,33 @@ fun LuxurySettingsScreen(
     var searchQuery by remember { mutableStateOf("") }
     var showAddContactDialog by remember { mutableStateOf(false) }
 
-    val filteredList = remember(allClients, searchQuery) {
+    var filterOption by remember { mutableStateOf(ContactFilterOption.ALL) }
+    var isFilterMenuExpanded by remember { mutableStateOf(false) }
+
+    val activeCount = remember(allClients) {
+        allClients.count { it.isInRotation }
+    }
+    val unselectedCount = remember(allClients, activeCount) {
+        allClients.size - activeCount
+    }
+
+    val filteredList = remember(allClients, searchQuery, filterOption) {
+        val baseList = when (filterOption) {
+            ContactFilterOption.ALL -> allClients
+            ContactFilterOption.SELECTED -> allClients.filter { it.isInRotation }
+            ContactFilterOption.UNSELECTED -> allClients.filter { !it.isInRotation }
+        }
         if (searchQuery.isBlank()) {
-            allClients
+            baseList
         } else {
             val q = searchQuery.trim().lowercase()
-            allClients.filter {
+            baseList.filter {
                 it.name.lowercase().contains(q) ||
                         it.number.contains(q) ||
                         it.company.lowercase().contains(q) ||
                         it.designation.lowercase().contains(q)
             }
         }
-    }
-
-    val activeCount = remember(allClients) {
-        allClients.count { it.isInRotation }
     }
 
     Box(
@@ -229,7 +251,7 @@ fun LuxurySettingsScreen(
                             .fillMaxSize()
                             .padding(horizontal = 16.dp, vertical = 12.dp)
                     ) {
-                        // Search & Add Bar
+                        // Search & Add Bar (Sleek Modern Pipe Design)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -237,32 +259,216 @@ fun LuxurySettingsScreen(
                             OutlinedTextField(
                                 value = searchQuery,
                                 onValueChange = { searchQuery = it },
-                                placeholder = { Text("Search by name, number, company...", fontSize = 13.sp) },
+                                placeholder = {
+                                    Text(
+                                        text = "name, number, company",
+                                        fontSize = 13.sp,
+                                        color = LuxuryTextMuted
+                                    )
+                                },
                                 leadingIcon = {
-                                    Icon(imageVector = Icons.Default.Search, contentDescription = null, tint = LuxuryTextMuted)
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = null,
+                                        tint = LuxuryTextMuted,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 },
                                 trailingIcon = {
                                     if (searchQuery.isNotEmpty()) {
                                         IconButton(onClick = { searchQuery = "" }) {
-                                            Icon(imageVector = Icons.Default.Close, contentDescription = "Clear", tint = LuxuryTextMuted)
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Clear",
+                                                tint = LuxuryTextMuted,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
                                     }
                                 },
                                 singleLine = true,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier.weight(1f)
+                                shape = RoundedCornerShape(26.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color(0xFFF8FAFC),
+                                    focusedBorderColor = LuxuryBlue,
+                                    unfocusedBorderColor = Color(0xFFE2E8F0)
+                                ),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(52.dp)
+                                    .testTag("settings_search_field")
                             )
 
                             Spacer(modifier = Modifier.width(10.dp))
 
-                            // Add Contact Button with "+91" built-in
+                            // Add Contact Button matching the sleek pipe design
                             Button(
                                 onClick = { showAddContactDialog = true },
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(26.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = LuxuryBlue),
-                                modifier = Modifier.height(52.dp)
+                                modifier = Modifier
+                                    .height(52.dp)
+                                    .testTag("settings_add_contact_button")
                             ) {
-                                Icon(imageVector = Icons.Default.Add, contentDescription = "Add Contact")
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Add Contact",
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // CONTACT FILTER DROPDOWN & QUICK CHIPS
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Filter Dropdown Anchor
+                            Box {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = Color.White,
+                                    border = BorderStroke(1.dp, LuxuryBlue),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable { isFilterMenuExpanded = true }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.FilterList,
+                                            contentDescription = "Filter Contacts",
+                                            tint = LuxuryBlue,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = when (filterOption) {
+                                                ContactFilterOption.ALL -> "Filter: All"
+                                                ContactFilterOption.SELECTED -> "Filter: Selected"
+                                                ContactFilterOption.UNSELECTED -> "Filter: Unselected"
+                                            },
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = LuxuryBlue
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = null,
+                                            tint = LuxuryBlue,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                DropdownMenu(
+                                    expanded = isFilterMenuExpanded,
+                                    onDismissRequest = { isFilterMenuExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "All Contacts",
+                                                    fontWeight = if (filterOption == ContactFilterOption.ALL) FontWeight.Black else FontWeight.Normal,
+                                                    fontSize = 13.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("(${allClients.size})", color = LuxuryTextMuted, fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            filterOption = ContactFilterOption.ALL
+                                            isFilterMenuExpanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "Selected",
+                                                    fontWeight = if (filterOption == ContactFilterOption.SELECTED) FontWeight.Black else FontWeight.Normal,
+                                                    color = Color(0xFF0D8267),
+                                                    fontSize = 13.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("($activeCount)", color = Color(0xFF0D8267), fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            filterOption = ContactFilterOption.SELECTED
+                                            isFilterMenuExpanded = false
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(
+                                                    text = "Unselected",
+                                                    fontWeight = if (filterOption == ContactFilterOption.UNSELECTED) FontWeight.Black else FontWeight.Normal,
+                                                    color = Color(0xFF64748B),
+                                                    fontSize = 13.sp
+                                                )
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text("($unselectedCount)", color = Color(0xFF64748B), fontSize = 11.sp)
+                                            }
+                                        },
+                                        onClick = {
+                                            filterOption = ContactFilterOption.UNSELECTED
+                                            isFilterMenuExpanded = false
+                                        }
+                                    )
+                                }
+                            }
+
+                            // Quick Toggle Chips
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (filterOption == ContactFilterOption.SELECTED) Color(0xFFD1FAE5) else Color(0xFFF1F5F9),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (filterOption == ContactFilterOption.SELECTED) Color(0xFF10B981) else Color(0xFFE2E8F0)
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { filterOption = ContactFilterOption.SELECTED }
+                                ) {
+                                    Text(
+                                        text = "Selected ($activeCount)",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (filterOption == ContactFilterOption.SELECTED) Color(0xFF047857) else Color(0xFF475569),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                    )
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (filterOption == ContactFilterOption.UNSELECTED) Color(0xFFFEE2E2) else Color(0xFFF1F5F9),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (filterOption == ContactFilterOption.UNSELECTED) Color(0xFFF87171) else Color(0xFFE2E8F0)
+                                    ),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { filterOption = ContactFilterOption.UNSELECTED }
+                                ) {
+                                    Text(
+                                        text = "Unselected ($unselectedCount)",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (filterOption == ContactFilterOption.UNSELECTED) Color(0xFFB91C1C) else Color(0xFF475569),
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                    )
+                                }
                             }
                         }
 

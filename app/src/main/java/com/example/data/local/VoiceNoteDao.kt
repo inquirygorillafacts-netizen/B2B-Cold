@@ -18,6 +18,9 @@ interface VoiceNoteDao {
     @Query("SELECT * FROM voice_notes WHERE clientId = :clientId ORDER BY recordedAt DESC LIMIT 1")
     suspend fun getLatestVoiceNoteForClient(clientId: String): VoiceNoteEntity?
 
+    @Query("SELECT * FROM voice_notes WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): VoiceNoteEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(voiceNote: VoiceNoteEntity)
 

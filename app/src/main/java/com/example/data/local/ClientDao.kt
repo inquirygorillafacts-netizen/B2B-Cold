@@ -40,6 +40,12 @@ interface ClientDao {
     @Query("UPDATE clients SET snoozeUntilTimestamp = :snoozeUntil WHERE id = :clientId")
     suspend fun setSnooze(clientId: String, snoozeUntil: Long)
 
+    @Query("SELECT * FROM clients")
+    suspend fun getAllClientsSnapshot(): List<ClientEntity>
+
+    @Query("UPDATE clients SET lastContactedTimestamp = :timestamp WHERE id = :clientId AND lastContactedTimestamp < :timestamp")
+    suspend fun updateLastContactedIfNewer(clientId: String, timestamp: Long)
+
     @Query("SELECT number FROM clients")
     suspend fun getAllNumbers(): List<String>
 

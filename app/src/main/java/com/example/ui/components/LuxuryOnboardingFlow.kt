@@ -3,6 +3,7 @@ package com.example.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,26 +12,33 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.ElectricBolt
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PhoneInTalk
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -38,34 +46,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.LightGlassBorderStroke
+import com.example.R
 import com.example.ui.theme.LuxuryBlue
 import com.example.ui.theme.LuxuryBlueContainer
 import com.example.ui.theme.LuxuryEmerald
 import com.example.ui.theme.LuxuryEmeraldContainer
-import com.example.ui.theme.LuxuryGold
-import com.example.ui.theme.LuxuryGoldBg
-import com.example.ui.theme.LuxuryPurple
-import com.example.ui.theme.LuxuryPurpleContainer
-import com.example.ui.theme.LuxuryRose
-import com.example.ui.theme.LuxuryRoseContainer
 import com.example.ui.theme.LuxuryTextMuted
 import com.example.ui.theme.LuxuryTextPrimary
 import com.example.ui.theme.LuxuryTextSecondary
+import com.example.ui.theme.RgbGlassBorder
+import com.example.util.CallHelper
 import kotlinx.coroutines.launch
 
-data class OnboardingSlideData(
+data class OnboardingSlide(
     val step: String,
+    val badge: String,
     val title: String,
     val headline: String,
     val description: String,
@@ -73,8 +79,7 @@ data class OnboardingSlideData(
     val icon: ImageVector,
     val accentColor: Color,
     val containerBg: Color,
-    val gradientColors: List<Color>,
-    val badgeLabel: String
+    val gradientColors: List<Color>
 )
 
 @Composable
@@ -82,120 +87,116 @@ fun LuxuryOnboardingFlow(
     onComplete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 5 Vibrant Rich-Tone Slides on Clean White Canvas (High-End Professional Mobile Experience)
+    val coroutineScope = rememberCoroutineScope()
+
+    // 5 Clean, Focused Feature Slides
     val slides = listOf(
-        OnboardingSlideData(
+        OnboardingSlide(
             step = "01 / 05",
-            title = "THE HABIT KILLER",
+            badge = "PROBLEM SOLVED: HABIT & CRM HESITATION",
+            title = "THE COLD OUTREACH ENGINE",
             headline = "Stop Scrolling Feeds.\nStart Closing Real Deals.",
-            description = "High-value business relationships don't grow in endless social scrolling. Your free minutes are your hidden revenue pipeline.",
-            quote = "\"Every free minute spent scrolling is a missed $100K executive conversation.\"",
+            description = "High-value business relationships don't grow in endless social scrolling. B2B Cold was built to kill hesitation, eliminate CRM friction, and turn free minutes into direct executive conversations.",
+            quote = "\"Every free minute spent scrolling is a missed executive deal.\"",
             icon = Icons.Default.TrendingUp,
-            accentColor = Color(0xFFD97706), // Amber Gold
+            accentColor = Color(0xFFD97706),
             containerBg = Color(0xFFFEF3C7),
-            gradientColors = listOf(Color(0xFFF59E0B), Color(0xFFD97706)),
-            badgeLabel = "THE $10M PARADIGM"
+            gradientColors = listOf(Color(0xFFF59E0B), Color(0xFFD97706))
         ),
-        OnboardingSlideData(
+        OnboardingSlide(
             step = "02 / 05",
-            title = "ZERO THINKING CALLING",
-            headline = "Who To Call Today?\nLet The Deck Decide.",
-            description = "Eliminate decision fatigue completely. No CRM searching or spreadsheet friction. One curated client card appears at a time.",
+            badge = "PROBLEM SOLVED: CRM FATIGUE",
+            title = "ZERO-FRICTION CALLING",
+            headline = "Who To Call Today?\nLet The 3D Deck Decide.",
+            description = "Spreadsheets and clunky CRMs cause hesitation. B2B Cold serves exactly one curated executive card at a time with 10-card physics so you execute without friction.",
             quote = "\"No hesitation. No second-guessing. Just pure daily momentum.\"",
             icon = Icons.Default.SwapHoriz,
-            accentColor = Color(0xFF059669), // Vibrant Emerald
+            accentColor = Color(0xFF059669),
             containerBg = Color(0xFFD1FAE5),
-            gradientColors = listOf(Color(0xFF10B981), Color(0xFF059669)),
-            badgeLabel = "FRICTIONLESS ROTATION"
+            gradientColors = listOf(Color(0xFF10B981), Color(0xFF059669))
         ),
-        OnboardingSlideData(
+        OnboardingSlide(
             step = "03 / 05",
-            title = "THE AUDIO MEMORY",
-            headline = "5-Second Voice Notes\nRefresh Context Instantly.",
-            description = "Listen to your past audio memories before dialing. Re-capture their deal terms, priorities, and personal details before they say hello.",
+            badge = "REAL CALL LOG INTELLIGENCE",
+            title = "AUTOMATIC TOUCHPOINTS",
+            headline = "Live Call History.\nNever Call Blind Again.",
+            description = "The engine checks your phone's call history directly. Instantly see whether you spoke 'Today', 'Yesterday', or '5 days ago' without ever having to manually type call logs.",
+            quote = "\"Know exactly when you last spoke before you even tap call.\"",
+            icon = Icons.Default.PhoneInTalk,
+            accentColor = Color(0xFF2563EB),
+            containerBg = Color(0xFFDBEAFE),
+            gradientColors = listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8))
+        ),
+        OnboardingSlide(
+            step = "04 / 05",
+            badge = "AUDIO BRAIN RECALL",
+            title = "EXECUTIVE VOICE NOTES",
+            headline = "5-Second Voice Notes.\nInstant Context Recall.",
+            description = "Record quick voice memos right on the client's card after a call. Listen to previous deal terms, family notes, and pricing before saying hello again.",
             quote = "\"Instant context creates effortless executive rapport.\"",
             icon = Icons.Default.Mic,
-            accentColor = Color(0xFF2563EB), // Royal Sapphire Blue
-            containerBg = Color(0xFFDBEAFE),
-            gradientColors = listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8)),
-            badgeLabel = "AUDIO BRAIN RECALL"
-        ),
-        OnboardingSlideData(
-            step = "04 / 05",
-            title = "THE COMPOUND EFFECT",
-            headline = "Just 5 Calls A Day =\n150 Relationships A Month.",
-            description = "Consistency crushes cold outreach. Reach out to 5 existing VIP clients, partners, and key prospects each day effortlessly.",
-            quote = "\"Strong relationships are the only non-depreciating business asset.\"",
-            icon = Icons.Default.PhoneInTalk,
-            accentColor = Color(0xFF7C3AED), // Vivid Royal Violet
+            accentColor = Color(0xFF7C3AED),
             containerBg = Color(0xFFEDE9FE),
-            gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9)),
-            badgeLabel = "DAILY DISCIPLINE"
+            gradientColors = listOf(Color(0xFF8B5CF6), Color(0xFF6D28D9))
         ),
-        OnboardingSlideData(
+        OnboardingSlide(
             step = "05 / 05",
-            title = "THE $10M CLIENT DECK",
-            headline = "Swipe To Connect.\nYour Network Is Ready.",
-            description = "Tactile physics, rich typography, and direct one-tap calling. Welcome to your ultra-focused executive deck.",
-            quote = "\"Your high-value rolodex, distilled into pure daily action.\"",
+            badge = "PIPELINE ROTATION & GOALS",
+            title = "SNOOZE & SMART FILTERS",
+            headline = "Snooze For 3 Days.\nFilter Selected Contacts.",
+            description = "Snooze clients who need space, filter Selected vs Unselected contacts in Settings, customize card deck swipe physics, and hit your daily calling commitment.",
+            quote = "\"Consistency is the only non-depreciating business asset.\"",
             icon = Icons.Default.RocketLaunch,
-            accentColor = Color(0xFFE11D48), // Electric Rose Crimson
+            accentColor = Color(0xFFE11D48),
             containerBg = Color(0xFFFFE4E6),
-            gradientColors = listOf(Color(0xFFF43F5E), Color(0xFFBE123C)),
-            badgeLabel = "READY TO LAUNCH"
+            gradientColors = listOf(Color(0xFFF43F5E), Color(0xFFBE123C))
         )
     )
 
     val pagerState = rememberPagerState(pageCount = { slides.size })
-    val coroutineScope = rememberCoroutineScope()
     val currentSlide = slides[pagerState.currentPage]
 
+    // Uniform, full-screen edge-to-edge gradient background (NO blurry bounding boxes or clipping)
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        currentSlide.containerBg.copy(alpha = 0.55f),
+                        Color(0xFFF8FAFC),
+                        Color.White
+                    )
+                )
+            )
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .testTag("luxury_onboarding_container")
     ) {
-        // Vibrant Ambient Background Glow Orbs tailored to each slide's RGB color
-        Box(
-            modifier = Modifier
-                .size(320.dp)
-                .align(Alignment.TopEnd)
-                .blur(90.dp)
-                .background(currentSlide.accentColor.copy(alpha = 0.14f), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(280.dp)
-                .align(Alignment.BottomStart)
-                .blur(90.dp)
-                .background(currentSlide.accentColor.copy(alpha = 0.10f), CircleShape)
-        )
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Top Bar: Step pill & Skip
+            // TOP BAR: Step pill & Skip Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 16.dp),
+                    .padding(top = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
                     shape = RoundedCornerShape(20.dp),
                     color = currentSlide.containerBg,
-                    border = BorderStroke(1.dp, currentSlide.accentColor.copy(alpha = 0.3f))
+                    border = BorderStroke(1.dp, currentSlide.accentColor.copy(alpha = 0.4f))
                 ) {
                     Text(
                         text = currentSlide.step,
                         color = currentSlide.accentColor,
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        fontWeight = FontWeight.Black,
                         letterSpacing = 1.5.sp,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
@@ -216,7 +217,7 @@ fun LuxuryOnboardingFlow(
                 }
             }
 
-            // Slide Page Slider
+            // PAGER AREA
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -224,121 +225,124 @@ fun LuxuryOnboardingFlow(
                     .fillMaxWidth()
             ) { page ->
                 val slide = slides[page]
+                val scrollState = rememberScrollState()
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(vertical = 8.dp),
+                        .verticalScroll(scrollState)
+                        .padding(vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Vibrant Gradient Icon Orb with dynamic colorful glow
+                    // Vibrant Icon Orb
                     Box(
                         modifier = Modifier
-                            .size(104.dp)
+                            .size(92.dp)
                             .clip(CircleShape)
                             .background(Brush.linearGradient(slide.gradientColors)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = slide.icon,
-                            contentDescription = slide.title,
+                            contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(50.dp)
+                            modifier = Modifier.size(46.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Badge Pill
+                    // Category Badge
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(10.dp),
                         color = slide.containerBg,
                         border = BorderStroke(1.dp, slide.accentColor.copy(alpha = 0.4f))
                     ) {
                         Text(
-                            text = slide.badgeLabel,
-                            color = slide.accentColor,
+                            text = slide.badge,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 1.2.sp,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                            fontWeight = FontWeight.Black,
+                            color = slide.accentColor,
+                            letterSpacing = 1.sp
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Big Bold Headline
                     Text(
                         text = slide.headline,
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.5).sp,
-                            lineHeight = 36.sp
-                        ),
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black,
                         color = LuxuryTextPrimary,
-                        textAlign = TextAlign.Center
+                        textAlign = TextAlign.Center,
+                        lineHeight = 28.sp
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Clear Description
                     Text(
                         text = slide.description,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            lineHeight = 22.sp,
-                            fontSize = 15.sp
-                        ),
+                        fontSize = 13.sp,
                         color = LuxuryTextSecondary,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 10.dp)
+                        lineHeight = 19.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp)
                     )
 
-                    Spacer(modifier = Modifier.height(22.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Quote Card with colorful accent border
+                    // VIP Quote Card
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFF8FAFC),
-                        border = BorderStroke(1.dp, slide.accentColor.copy(alpha = 0.25f))
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        shadowElevation = 2.dp,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = slide.quote,
-                            style = MaterialTheme.typography.bodySmall.copy(
+                        Row(
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                tint = slide.accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = slide.quote,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                lineHeight = 19.sp,
-                                fontSize = 13.sp
-                            ),
-                            color = slide.accentColor,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
-                        )
+                                color = Color(0xFF334155),
+                                lineHeight = 17.sp
+                            )
+                        }
                     }
                 }
             }
 
-            // Bottom Navigation & Dynamic Action Button
+            // BOTTOM CONTROLS: Dots Indicator & Next / Get Started Button
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Interactive Dot Indicators
+                // Animated Dots
                 Row(
-                    horizontalArrangement = Arrangement.Center,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 24.dp)
+                    modifier = Modifier.padding(vertical = 12.dp)
                 ) {
-                    repeat(slides.size) { index ->
+                    slides.indices.forEach { index ->
                         val isSelected = pagerState.currentPage == index
                         Box(
                             modifier = Modifier
-                                .padding(horizontal = 4.dp)
-                                .height(7.dp)
-                                .width(if (isSelected) 28.dp else 7.dp)
+                                .height(6.dp)
+                                .width(if (isSelected) 24.dp else 6.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (isSelected) currentSlide.accentColor else Color(0xFFCBD5E1)
@@ -347,90 +351,41 @@ fun LuxuryOnboardingFlow(
                     }
                 }
 
-                // CTA Button (Next or Final Enter)
-                if (pagerState.currentPage == slides.size - 1) {
-                    Button(
-                        onClick = onComplete,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .testTag("onboarding_enter_deck_button"),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent
-                        ),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.horizontalGradient(currentSlide.gradientColors),
-                                    RoundedCornerShape(18.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "ENTER $10M CLIENT DECK",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    fontSize = 15.sp,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    Button(
-                        onClick = {
+                // Next or Get Started Button
+                val isLastPage = pagerState.currentPage == slides.size - 1
+                Button(
+                    onClick = {
+                        if (isLastPage) {
+                            onComplete()
+                        } else {
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(pagerState.currentPage + 1)
                             }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .testTag("onboarding_next_button"),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color.Transparent
-                        ),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(
-                                    Brush.horizontalGradient(currentSlide.gradientColors),
-                                    RoundedCornerShape(18.dp)
-                                ),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "Continue",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Icon(
-                                    imageVector = Icons.Default.ArrowForward,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
                         }
-                    }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .testTag(if (isLastPage) "onboarding_launch_button" else "onboarding_next_button"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = currentSlide.accentColor
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Text(
+                        text = if (isLastPage) "Enter $10M Rolodex Deck" else "Continue",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = if (isLastPage) Icons.Default.RocketLaunch else Icons.Default.ArrowForward,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
         }

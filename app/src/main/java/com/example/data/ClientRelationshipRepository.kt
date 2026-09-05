@@ -148,7 +148,47 @@ class ClientRelationshipRepository(private val context: Context) {
         voiceNoteDao.insert(note)
     }
 
+    suspend fun syncDiskVoiceNotesForClient(clientId: String) = withContext(Dispatchers.IO) {
+        try {
+            val client = clientDao.getClientById(clientId) ?: return@withContext
+            val cleanNumber = client.number.replace(Regex("[^0-9]"), "").let {
+                if (it.length > 10) it.takeLast(10) else it
+            }
+            if (cleanNumber.isBlank()) return@withContext
+
+            val recordingsDir = com.example.util.VoiceAudioManager.getAppRecordingsDirectory(context)
+            val files = recordingsDir.listFiles { _, name ->
+                name.startsWith("rec_${cleanNumber}_") && name.endsWith(".m4a")
+            } ?: return@withContext
+
+            for (file in files) {
+                val note = VoiceNoteEntity(
+                    id = "disk-${file.nameWithoutExtension}",
+                    clientId = clientId,
+                    audioFilePath = file.absolutePath,
+                    durationSeconds = 12,
+                    summary = "Client follow-up note",
+                    recordedAt = file.lastModified()
+                )
+                voiceNoteDao.insert(note)
+            }
+        } catch (e: Exception) {
+            // Non-blocking disk sync
+        }
+    }
+
     suspend fun deleteVoiceNote(id: String) = withContext(Dispatchers.IO) {
+        try {
+            val note = voiceNoteDao.getById(id)
+            if (note != null && note.audioFilePath.isNotBlank()) {
+                val file = java.io.File(note.audioFilePath)
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
+        } catch (e: Exception) {
+            // Ignore file deletion error
+        }
         voiceNoteDao.deleteById(id)
     }
 
@@ -163,8 +203,74 @@ class ClientRelationshipRepository(private val context: Context) {
         private const val KEY_LAST_TX_ID = "last_payu_tx_id"
         private const val KEY_CARD_ANIMATION_STYLE = "selected_card_animation_style"
         private const val KEY_PREFERRED_WHATSAPP_PACKAGE = "preferred_whatsapp_package"
-        const val ONE_HOUR_MS = 60 * 60 * 1000L
+        private const val KEY_HAS_COMPLETED_ONBOARDING = "has_completed_onboarding_flow"
+        private const val KEY_CALLS_TODAY_DATE = "calls_today_calendar_date"
+        private const val KEY_CALLS_TODAY_COUNT = "calls_today_count"
+        private const val KEY_DAILY_CALL_GOAL = "daily_call_goal"
+        const val TEN_MINUTES_MS = 10 * 60 * 1000L
         const val TRIAL_DURATION_DAYS = 60
+    }
+
+    fun hasCompletedOnboarding(): Boolean {
+        return prefs.getBoolean(KEY_HAS_COMPLETED_ONBOARDING, false)
+    }
+
+    fun setCompletedOnboarding(completed: Boolean) {
+        prefs.edit().putBoolean(KEY_HAS_COMPLETED_ONBOARDING, completed).apply()
+    }
+
+    private fun getTodayDateString(): String {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        return sdf.format(java.util.Date())
+    }
+
+    fun getCallsMadeToday(): Int {
+        val today = getTodayDateString()
+        val savedDate = prefs.getString(KEY_CALLS_TODAY_DATE, "")
+        return if (savedDate == today) {
+            prefs.getInt(KEY_CALLS_TODAY_COUNT, 0)
+        } else {
+            prefs.edit().putString(KEY_CALLS_TODAY_DATE, today).putInt(KEY_CALLS_TODAY_COUNT, 0).apply()
+            0
+        }
+    }
+
+    fun incrementCallsMadeToday(): Int {
+        val today = getTodayDateString()
+        val savedDate = prefs.getString(KEY_CALLS_TODAY_DATE, "")
+        val current = if (savedDate == today) prefs.getInt(KEY_CALLS_TODAY_COUNT, 0) else 0
+        val next = current + 1
+        prefs.edit()
+            .putString(KEY_CALLS_TODAY_DATE, today)
+            .putInt(KEY_CALLS_TODAY_COUNT, next)
+            .apply()
+        return next
+    }
+
+    fun getDailyCallGoal(): Int {
+        return prefs.getInt(KEY_DAILY_CALL_GOAL, 8)
+    }
+
+    fun setDailyCallGoal(goal: Int) {
+        prefs.edit().putInt(KEY_DAILY_CALL_GOAL, goal).apply()
+    }
+
+    fun getUserProfileData(): UserProfileData {
+        return UserProfileData(
+            dailyCallGoal = getDailyCallGoal(),
+            callsMadeToday = getCallsMadeToday()
+        )
+    }
+
+    fun shouldAutoSyncOnAppOpen(): Boolean {
+        val lastSync = prefs.getLong(KEY_LAST_SYNC_TIME, 0L)
+        if (lastSync == 0L) return true
+        val elapsed = System.currentTimeMillis() - lastSync
+        return elapsed >= TEN_MINUTES_MS
+    }
+
+    fun getLastSyncTimestamp(): Long {
+        return prefs.getLong(KEY_LAST_SYNC_TIME, 0L)
     }
 
     fun getCardAnimationStyle(): com.example.model.CardAnimationStyle {
@@ -224,8 +330,8 @@ class ClientRelationshipRepository(private val context: Context) {
         val now = System.currentTimeMillis()
         val count = clientDao.getCount()
 
-        // 1-Hour Cache Rule: If not forced and already synced in the last hour, skip to preserve performance
-        if (!force && count > 0 && (now - lastSync < ONE_HOUR_MS)) {
+        // 10-Minute Cache Rule: If not forced and already synced in the last 10 minutes, skip to preserve performance
+        if (!force && count > 0 && (now - lastSync < TEN_MINUTES_MS)) {
             onProgress(100, "Contacts already up to date")
             return@withContext false
         }
@@ -287,8 +393,41 @@ class ClientRelationshipRepository(private val context: Context) {
         }
 
         prefs.edit().putLong(KEY_LAST_SYNC_TIME, now).apply()
+        // Synchronize call history touchpoints with device call log
+        syncCallHistoryTouchpointsInternal()
+
         onProgress(100, "Sync complete! ${deviceContacts.size} contacts active")
         return@withContext true
+    }
+
+    /**
+     * Fast, non-blocking scan of recent call log to update lastContactedTimestamp
+     * for all matching clients in the Room database.
+     */
+    suspend fun syncCallHistoryTouchpoints(): Boolean = withContext(Dispatchers.IO) {
+        syncCallHistoryTouchpointsInternal()
+    }
+
+    private suspend fun syncCallHistoryTouchpointsInternal(): Boolean {
+        if (!com.example.util.CallLogHelper.hasCallLogPermission(context)) return false
+        return try {
+            val callMap = com.example.util.CallLogHelper.getAllRecentCallsMap(context)
+            if (callMap.isEmpty()) return false
+
+            val clients = clientDao.getAllClientsSnapshot()
+            for (client in clients) {
+                val key = com.example.util.CallLogHelper.normalizeToKey(client.number)
+                if (key.length >= 7) {
+                    val lastCall = callMap[key]
+                    if (lastCall != null && lastCall > client.lastContactedTimestamp) {
+                        clientDao.updateLastContactedIfNewer(client.id, lastCall)
+                    }
+                }
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun getLastSyncTimeString(): String {
