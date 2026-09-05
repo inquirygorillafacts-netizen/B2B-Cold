@@ -29,12 +29,18 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Payment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import com.example.ui.DiskRecordingItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -107,6 +113,10 @@ fun LuxurySettingsScreen(
     onOpenPayUSheet: () -> Unit,
     onResetOnboarding: () -> Unit,
     onNavigateBack: () -> Unit,
+    diskRecordings: List<DiskRecordingItem> = emptyList(),
+    onOpenRecordingsLocation: () -> Unit = {},
+    onShareRecordingFile: (java.io.File) -> Unit = {},
+    onDeleteRecordingFile: (java.io.File) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -780,6 +790,122 @@ fun LuxurySettingsScreen(
                                             text = "Upgrade Subscription (from ₹49)",
                                             fontWeight = FontWeight.Black,
                                             fontSize = 14.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // VOICE RECORDINGS & FILE LOCATION SECTION
+                        item {
+                            Text(
+                                text = "EXECUTIVE VOICE RECORDINGS",
+                                fontWeight = FontWeight.Black,
+                                fontSize = 16.sp,
+                                color = LuxuryTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "All voice notes recorded for your clients are saved safely on device storage.",
+                                fontSize = 12.sp,
+                                color = LuxuryTextSecondary
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = Color.White,
+                                border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                shadowElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Surface(
+                                                shape = CircleShape,
+                                                color = Color(0xFFEFF6FF),
+                                                modifier = Modifier.size(38.dp)
+                                            ) {
+                                                Box(contentAlignment = Alignment.Center) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Folder,
+                                                        contentDescription = null,
+                                                        tint = LuxuryBlue,
+                                                        modifier = Modifier.size(20.dp)
+                                                    )
+                                                }
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = "Device Storage Folder",
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 14.sp,
+                                                    color = LuxuryTextPrimary
+                                                )
+                                                Text(
+                                                    text = "B2B_ColdCaller_Recordings",
+                                                    fontSize = 11.sp,
+                                                    color = LuxuryTextSecondary
+                                                )
+                                            }
+                                        }
+
+                                        Surface(
+                                            shape = RoundedCornerShape(8.dp),
+                                            color = if (diskRecordings.isNotEmpty()) Color(0xFFDCFCE7) else Color(0xFFF1F5F9)
+                                        ) {
+                                            Text(
+                                                text = if (diskRecordings.isNotEmpty()) "${diskRecordings.size} Recordings" else "0 Recordings",
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                color = if (diskRecordings.isNotEmpty()) Color(0xFF166534) else Color(0xFF475569),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    Text(
+                                        text = if (diskRecordings.isNotEmpty()) {
+                                            "Saved in Downloads / B2B_ColdCaller_Recordings and named by client phone number (e.g. 8302806913-1, 8302806913-2)."
+                                        } else {
+                                            "Abhi tak koi voice note record nahi kiya gaya hai. Pehle kisi bhi client card par Mic icon daba kar voice note record karein, fir yahan files dikhengi."
+                                        },
+                                        fontSize = 12.sp,
+                                        color = if (diskRecordings.isNotEmpty()) LuxuryTextSecondary else Color(0xFFB45309),
+                                        lineHeight = 16.sp
+                                    )
+
+                                    Spacer(modifier = Modifier.height(14.dp))
+
+                                    // Button requested by user: Open Recording Location
+                                    Button(
+                                        onClick = onOpenRecordingsLocation,
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.buttonColors(containerColor = LuxuryBlue),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("open_recordings_location_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.OpenInNew,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Open Recording Location",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = Color.White
                                         )
                                     }
                                 }

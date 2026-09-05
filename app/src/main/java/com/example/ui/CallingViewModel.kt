@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.random.Random
 
 data class PermissionState(
@@ -42,6 +43,14 @@ data class SyncProgressState(
     val progressPercent: Int = 0,
     val statusMessage: String = "",
     val isCompleted: Boolean = false
+)
+
+data class DiskRecordingItem(
+    val file: java.io.File,
+    val fileName: String,
+    val formattedSize: String,
+    val formattedDate: String,
+    val clientName: String?
 )
 
 class CallingViewModel(application: Application) : AndroidViewModel(application) {
@@ -95,6 +104,11 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
 
     private val _currentClientVoiceNotes = MutableStateFlow<List<VoiceNoteEntity>>(emptyList())
     val currentClientVoiceNotes: StateFlow<List<VoiceNoteEntity>> = _currentClientVoiceNotes.asStateFlow()
+
+    private var voiceNotesJob: kotlinx.coroutines.Job? = null
+
+    private val _diskRecordingsList = MutableStateFlow<List<DiskRecordingItem>>(emptyList())
+    val diskRecordingsList: StateFlow<List<DiskRecordingItem>> = _diskRecordingsList.asStateFlow()
 
     val playbackState: StateFlow<PlaybackState> = audioManager.playbackState
     val recordingState: StateFlow<RecordingState> = audioManager.recordingState
@@ -176,10 +190,16 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
                 if (list.isNotEmpty() && _currentRandomClient.value == null) {
                     pickRandomClientFromList(list)
                 } else if (list.isNotEmpty() && _currentRandomClient.value?.let { curr -> list.none { it.id == curr.id } } == true) {
-                    pickRandomClientFromList(list)
+                    // Only auto-switch if the client was completely removed from the database
+                    val stillExists = allClients.value.any { it.id == _currentRandomClient.value?.id }
+                    if (!stillExists) {
+                        pickRandomClientFromList(list)
+                    }
                 }
             }
         }
+        VoiceAudioManager.migrateLegacyRecordings(getApplication())
+        refreshDiskRecordings()
     }
 
     fun setCardAnimationStyle(style: CardAnimationStyle) {
@@ -289,10 +309,11 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun loadVoiceNotesForClient(client: ClientEntity) {
-        viewModelScope.launch {
+        voiceNotesJob?.cancel()
+        voiceNotesJob = viewModelScope.launch(Dispatchers.IO) {
             clientRepo.syncDiskVoiceNotesForClient(client.id)
             clientRepo.getVoiceNotesForClient(client.id).collect { notes ->
-                _currentClientVoiceNotes.value = notes
+                _currentClientVoiceNotes.value = notes.take(5)
             }
         }
     }
@@ -362,36 +383,50 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // Audio Recording
-    fun startRecordingVoiceNote(): Boolean {
-        val currentNum = _currentRandomClient.value?.number ?: ""
-        return audioManager.startRecording(currentNum)
+    fun startRecordingVoiceNote(clientNumber: String = ""): Boolean {
+        val numberToUse = if (clientNumber.isNotBlank()) {
+            clientNumber
+        } else {
+            _currentRandomClient.value?.number ?: ""
+        }
+        return audioManager.startRecording(numberToUse)
     }
 
     fun stopRecordingVoiceNote(clientId: String, summary: String = "") {
-        val existingCount = _currentClientVoiceNotes.value.size
-        if (existingCount >= 5) {
+        val currentList = _currentClientVoiceNotes.value
+        if (currentList.size >= 5) {
             audioManager.cancelRecording()
             return
         }
         val (filePath, duration) = audioManager.stopRecording()
         if (filePath != null) {
-            viewModelScope.launch {
-                clientRepo.saveVoiceNote(
+            viewModelScope.launch(Dispatchers.IO) {
+                val newNote = clientRepo.saveVoiceNoteAndReturn(
                     clientId = clientId,
                     audioFilePath = filePath,
                     durationSeconds = duration,
-                    summary = summary.ifBlank { "Client follow-up note #${existingCount + 1}" }
+                    summary = summary.ifBlank { "Client voice memory #${currentList.size + 1}" }
                 )
+                val updated = (currentList + newNote).distinctBy { it.id }.take(5)
+                withContext(Dispatchers.Main) {
+                    _currentClientVoiceNotes.value = updated
+                }
+                refreshDiskRecordings()
             }
         }
     }
 
     fun deleteVoiceNote(voiceNoteId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             if (playbackState.value.currentVoiceNoteId == voiceNoteId) {
                 audioManager.stopPlayback()
             }
             clientRepo.deleteVoiceNote(voiceNoteId)
+            val updated = _currentClientVoiceNotes.value.filter { it.id != voiceNoteId }
+            withContext(Dispatchers.Main) {
+                _currentClientVoiceNotes.value = updated
+            }
+            refreshDiskRecordings()
         }
     }
 
@@ -474,6 +509,218 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     fun setDailyCallGoal(goal: Int) {
         clientRepo.setDailyCallGoal(goal)
         _userProfile.value = _userProfile.value.copy(dailyCallGoal = goal)
+    }
+
+    fun refreshDiskRecordings() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val context = getApplication<Application>()
+                val files = VoiceAudioManager.getAllDiskRecordings(context)
+                val allList = allClients.value
+                val items = files.map { file ->
+                    val nameNoExt = file.nameWithoutExtension
+                    val clientNum = when {
+                        nameNoExt.contains("-") -> nameNoExt.substringBeforeLast("-")
+                        nameNoExt.contains("_") -> nameNoExt.split("_").getOrNull(1) ?: ""
+                        else -> ""
+                    }
+                    val clientMatch = allList.find { it.number.replace(Regex("[^0-9]"), "").endsWith(clientNum) }
+                    val dateStr = java.text.SimpleDateFormat("MMM dd, yyyy • hh:mm a", java.util.Locale.US).format(java.util.Date(file.lastModified()))
+                    DiskRecordingItem(
+                        file = file,
+                        fileName = file.name,
+                        formattedSize = VoiceAudioManager.formatFileSize(file.length()),
+                        formattedDate = dateStr,
+                        clientName = clientMatch?.name ?: if (clientNum.isNotBlank()) "Client ($clientNum)" else "Executive Voice Note"
+                    )
+                }
+                _diskRecordingsList.value = items
+            } catch (e: Exception) {
+                // non-blocking
+            }
+        }
+    }
+
+    fun openRecordingsLocation(context: Context) {
+        val folder = VoiceAudioManager.getAppRecordingsDirectory(context)
+
+        // 1. Run sync to public Downloads & MediaStore in background
+        viewModelScope.launch(Dispatchers.IO) {
+            VoiceAudioManager.syncAllToPublicDownloads(context)
+            val files = VoiceAudioManager.getAllDiskRecordings(context)
+            if (files.isNotEmpty()) {
+                try {
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        files.map { it.absolutePath }.toTypedArray(),
+                        null,
+                        null
+                    )
+                } catch (e: Exception) {
+                    // non-blocking
+                }
+            }
+        }
+
+        // 2. Copy exact folder path to clipboard
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText("Recordings Folder Path", folder.absolutePath)
+            clipboard?.setPrimaryClip(clip)
+        } catch (e: Exception) {
+            // ignore
+        }
+
+        val pm = context.packageManager
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            folder
+        )
+
+        // Known Files applications across Android ecosystem
+        val fileAppPackages = listOf(
+            "com.google.android.apps.nbu.files",      // Files by Google
+            "com.google.android.documentsui",        // Google DocumentsUI
+            "com.android.documentsui",               // AOSP DocumentsUI
+            "com.sec.android.app.myfiles",           // Samsung My Files
+            "com.mi.android.globalFileexplorer",     // Xiaomi / Redmi / Poco File Manager
+            "com.coloros.filemanager",               // Oppo / Realme File Manager
+            "com.oneplus.filemanager",               // OnePlus File Manager
+            "com.vivo.filemanager",                  // Vivo / iQOO File Manager
+            "com.transsion.filemanager"              // Tecno / Infinix File Manager
+        )
+
+        val installedFilesPackage = fileAppPackages.firstOrNull { pkg ->
+            try {
+                pm.getPackageInfo(pkg, 0)
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        var openedDirectly = false
+
+        // Try 1: Launch targeted Files app directly (NO chooser dialog)
+        if (installedFilesPackage != null) {
+            val mimeTypes = listOf("vnd.android.document/directory", "resource/folder", "*/*")
+            for (mime in mimeTypes) {
+                try {
+                    val directIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mime)
+                        addFlags(
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            android.content.Intent.FLAG_GRANT_PREFIX_URI_PERMISSION or
+                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        )
+                        setPackage(installedFilesPackage)
+                    }
+                    if (directIntent.resolveActivity(pm) != null) {
+                        context.startActivity(directIntent)
+                        openedDirectly = true
+                        break
+                    }
+                } catch (e: Exception) {
+                    // Try next mime
+                }
+            }
+
+            // If action view with URI didn't resolve for the package, open the Files app main interface directly
+            if (!openedDirectly) {
+                try {
+                    val launchIntent = pm.getLaunchIntentForPackage(installedFilesPackage)?.apply {
+                        addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    if (launchIntent != null) {
+                        context.startActivity(launchIntent)
+                        openedDirectly = true
+                    }
+                } catch (e: Exception) {
+                    // fallback below
+                }
+            }
+        }
+
+        // Try 2: Generic direct ACTION_VIEW (NO createChooser to avoid the "open option" dialog)
+        if (!openedDirectly) {
+            try {
+                val directIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "vnd.android.document/directory")
+                    addFlags(
+                        android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        android.content.Intent.FLAG_GRANT_PREFIX_URI_PERMISSION or
+                        android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                    )
+                }
+                context.startActivity(directIntent)
+                openedDirectly = true
+            } catch (e: Exception) {
+                try {
+                    val fallbackIntent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "*/*")
+                        addFlags(
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                        )
+                    }
+                    context.startActivity(fallbackIntent)
+                    openedDirectly = true
+                } catch (e2: Exception) {
+                    try {
+                        val browseIntent = android.content.Intent("android.provider.action.BROWSE").apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(browseIntent)
+                        openedDirectly = true
+                    } catch (e3: Exception) {
+                        // ignore
+                    }
+                }
+            }
+        }
+
+        val count = _diskRecordingsList.value.size
+        val msg = if (count > 0) {
+            "Files app open ho gaya! Downloads me 'B2B_ColdCaller_Recordings' ya upar 'Audio' tab dekhein ($count notes)"
+        } else {
+            "Files app open ho gaya! Abhi koi note record nahi hai — pehle kisi card par Mic se recording karein."
+        }
+
+        android.widget.Toast.makeText(
+            context,
+            msg,
+            android.widget.Toast.LENGTH_LONG
+        ).show()
+    }
+
+    fun shareRecordingFile(context: Context, file: java.io.File) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                type = "audio/*"
+                putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Voice Recording"))
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "Could not share file: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteDiskRecordingFile(file: java.io.File) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val path = file.absolutePath
+            if (file.exists()) {
+                file.delete()
+            }
+            clientRepo.deleteVoiceNoteByFilePath(path)
+            refreshDiskRecordings()
+        }
     }
 
     override fun onCleared() {

@@ -121,7 +121,7 @@ fun LuxuryClientCardDeck(
     onSnoozeClick: (ClientEntity, Int) -> Unit,
     onPlayVoiceNote: (VoiceNoteEntity) -> Unit,
     onStopPlayback: () -> Unit,
-    onStartRecording: () -> Unit,
+    onStartRecording: (String) -> Unit,
     onStopRecording: (String, String) -> Unit,
     onCancelRecording: () -> Unit,
     onDeleteVoiceNote: (String) -> Unit = {},
@@ -501,7 +501,7 @@ fun LuxuryClientCardDeck(
             recordingState = recordingState,
             onPlayVoiceNote = onPlayVoiceNote,
             onStopPlayback = onStopPlayback,
-            onStartRecording = onStartRecording,
+            onStartRecording = { onStartRecording(client.number) },
             onStopRecording = { summary ->
                 onStopRecording(client.id, summary)
             },
@@ -769,7 +769,7 @@ fun RomanticCardSurface(
     }
     val effectiveLastContacted = remember(client.id, client.lastContactedTimestamp, dynamicLogTimestamp) {
         val dbTs = client.lastContactedTimestamp
-        val logTs = dynamicLogTimestamp ?: CallLogHelper.getLastCallTimestamp(context, client.number)
+        val logTs = dynamicLogTimestamp
         when {
             logTs != null && logTs > dbTs -> logTs
             dbTs > 0L -> dbTs

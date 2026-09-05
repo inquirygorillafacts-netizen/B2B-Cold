@@ -52,6 +52,6 @@ interface ClientDao {
     @Query("SELECT COUNT(*) FROM clients")
     suspend fun getCount(): Int
 
-    @Query("DELETE FROM clients WHERE id LIKE 'client-%'")
+    @Query("DELETE FROM clients WHERE id LIKE 'client-%' AND id NOT IN (SELECT DISTINCT clientId FROM voice_notes)")
     suspend fun removeSeedClients()
 }

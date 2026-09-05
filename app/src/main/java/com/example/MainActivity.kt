@@ -94,6 +94,7 @@ fun TenMillionClientDeckApp(
     val preferredWhatsAppPackage by viewModel.preferredWhatsAppPackage.collectAsStateWithLifecycle()
     val pendingWhatsAppClient by viewModel.pendingWhatsAppClient.collectAsStateWithLifecycle()
     val syncProgressState by viewModel.syncProgressState.collectAsStateWithLifecycle()
+    val diskRecordings by viewModel.diskRecordingsList.collectAsStateWithLifecycle()
 
     var hasAttemptedPermissionRequest by remember { mutableStateOf(false) }
     var pendingCallClient by remember { mutableStateOf<ClientEntity?>(null) }
@@ -258,6 +259,16 @@ fun TenMillionClientDeckApp(
                 },
                 onNavigateBack = {
                     viewModel.closeSettingsScreen()
+                },
+                diskRecordings = diskRecordings,
+                onOpenRecordingsLocation = {
+                    viewModel.openRecordingsLocation(context)
+                },
+                onShareRecordingFile = { file ->
+                    viewModel.shareRecordingFile(context, file)
+                },
+                onDeleteRecordingFile = { file ->
+                    viewModel.deleteDiskRecordingFile(file)
                 }
             )
         } else {
@@ -330,8 +341,8 @@ fun TenMillionClientDeckApp(
                     onStopPlayback = {
                         viewModel.stopAudioPlayback()
                     },
-                    onStartRecording = {
-                        viewModel.startRecordingVoiceNote()
+                    onStartRecording = { clientNum ->
+                        viewModel.startRecordingVoiceNote(clientNum)
                     },
                     onStopRecording = { clientId, summary ->
                         viewModel.stopRecordingVoiceNote(clientId, summary)

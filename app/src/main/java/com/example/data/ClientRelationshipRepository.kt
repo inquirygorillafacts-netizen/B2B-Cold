@@ -137,15 +137,34 @@ class ClientRelationshipRepository(private val context: Context) {
         durationSeconds: Int,
         summary: String
     ) = withContext(Dispatchers.IO) {
+        saveVoiceNoteAndReturn(clientId, audioFilePath, durationSeconds, summary)
+    }
+
+    suspend fun saveVoiceNoteAndReturn(
+        clientId: String,
+        audioFilePath: String,
+        durationSeconds: Int,
+        summary: String
+    ): VoiceNoteEntity = withContext(Dispatchers.IO) {
+        // Cap at max 5 notes: delete the oldest if we already have >= 5
+        val snapshot = voiceNoteDao.getVoiceNotesSnapshot(clientId)
+        if (snapshot.size >= 5) {
+            val oldest = snapshot.lastOrNull()
+            if (oldest != null) {
+                deleteVoiceNote(oldest.id)
+            }
+        }
+
         val note = VoiceNoteEntity(
             id = UUID.randomUUID().toString(),
             clientId = clientId,
             audioFilePath = audioFilePath,
             durationSeconds = durationSeconds,
-            summary = summary.ifBlank { "Recorded executive note on ${java.text.SimpleDateFormat("MMM dd, yyyy", java.util.Locale.US).format(java.util.Date())}" },
+            summary = summary.ifBlank { "Client voice memory #${snapshot.size + 1}" },
             recordedAt = System.currentTimeMillis()
         )
         voiceNoteDao.insert(note)
+        note
     }
 
     suspend fun syncDiskVoiceNotesForClient(clientId: String) = withContext(Dispatchers.IO) {
@@ -158,19 +177,40 @@ class ClientRelationshipRepository(private val context: Context) {
 
             val recordingsDir = com.example.util.VoiceAudioManager.getAppRecordingsDirectory(context)
             val files = recordingsDir.listFiles { _, name ->
-                name.startsWith("rec_${cleanNumber}_") && name.endsWith(".m4a")
+                (name.startsWith("$cleanNumber-") || name.startsWith("rec_${cleanNumber}_") || name.contains(cleanNumber)) && name.endsWith(".m4a")
             } ?: return@withContext
 
-            for (file in files) {
-                val note = VoiceNoteEntity(
-                    id = "disk-${file.nameWithoutExtension}",
-                    clientId = clientId,
-                    audioFilePath = file.absolutePath,
-                    durationSeconds = 12,
-                    summary = "Client follow-up note",
-                    recordedAt = file.lastModified()
-                )
-                voiceNoteDao.insert(note)
+            // 1. Clean up stale DB records whose file on disk no longer exists
+            val existingNotes = voiceNoteDao.getVoiceNotesSnapshot(clientId)
+            for (note in existingNotes) {
+                if (note.audioFilePath.isNotBlank() && !note.audioFilePath.startsWith("seed_")) {
+                    val f = java.io.File(note.audioFilePath)
+                    if (!f.exists() || f.length() == 0L) {
+                        voiceNoteDao.deleteById(note.id)
+                    }
+                }
+            }
+
+            // 2. Fetch updated notes snapshot
+            val validNotes = voiceNoteDao.getVoiceNotesSnapshot(clientId).toMutableList()
+            val existingPaths = validNotes.map { it.audioFilePath }.toSet()
+
+            // 3. For any file on disk not yet in DB, only register if total notes < 5
+            for (file in files.sortedByDescending { it.lastModified() }) {
+                if (!existingPaths.contains(file.absolutePath) && file.length() > 0L) {
+                    if (validNotes.size < 5) {
+                        val note = VoiceNoteEntity(
+                            id = "disk-${file.nameWithoutExtension}",
+                            clientId = clientId,
+                            audioFilePath = file.absolutePath,
+                            durationSeconds = 12,
+                            summary = "Client follow-up memory",
+                            recordedAt = file.lastModified()
+                        )
+                        voiceNoteDao.insert(note)
+                        validNotes.add(note)
+                    }
+                }
             }
         } catch (e: Exception) {
             // Non-blocking disk sync
@@ -185,11 +225,17 @@ class ClientRelationshipRepository(private val context: Context) {
                 if (file.exists()) {
                     file.delete()
                 }
+                // Also delete any duplicate DB records that reference this same audio file
+                voiceNoteDao.deleteByAudioFilePath(note.audioFilePath)
             }
         } catch (e: Exception) {
             // Ignore file deletion error
         }
         voiceNoteDao.deleteById(id)
+    }
+
+    suspend fun deleteVoiceNoteByFilePath(filePath: String) = withContext(Dispatchers.IO) {
+        voiceNoteDao.deleteByAudioFilePath(filePath)
     }
 
     private val prefs = context.getSharedPreferences("b2b_client_prefs", Context.MODE_PRIVATE)

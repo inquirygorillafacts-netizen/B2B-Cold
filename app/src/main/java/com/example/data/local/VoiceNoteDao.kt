@@ -29,4 +29,16 @@ interface VoiceNoteDao {
 
     @Query("DELETE FROM voice_notes WHERE id = :id")
     suspend fun deleteById(id: String)
+
+    @Query("SELECT * FROM voice_notes WHERE clientId = :clientId ORDER BY recordedAt DESC")
+    suspend fun getVoiceNotesSnapshot(clientId: String): List<VoiceNoteEntity>
+
+    @Query("SELECT * FROM voice_notes WHERE audioFilePath = :filePath")
+    suspend fun getByAudioFilePath(filePath: String): List<VoiceNoteEntity>
+
+    @Query("DELETE FROM voice_notes WHERE audioFilePath = :filePath")
+    suspend fun deleteByAudioFilePath(filePath: String)
+
+    @Query("SELECT COUNT(*) FROM voice_notes WHERE clientId = :clientId")
+    suspend fun getCountForClient(clientId: String): Int
 }
