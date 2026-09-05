@@ -17,6 +17,14 @@ import java.util.Locale
 object CallHelper {
 
     fun makeCall(context: Context, phoneNumber: String) {
+        makeDirectCall(context, phoneNumber)
+    }
+
+    /**
+     * Direct one-tap phone call without opening external dialer application.
+     * Uses ACTION_CALL when CALL_PHONE permission is granted.
+     */
+    fun makeDirectCall(context: Context, phoneNumber: String) {
         val cleanNumber = phoneNumber.trim()
         if (cleanNumber.isBlank()) {
             Toast.makeText(context, "Number cannot be empty", Toast.LENGTH_SHORT).show()
@@ -29,21 +37,26 @@ object CallHelper {
         ) == PackageManager.PERMISSION_GRANTED
 
         try {
-            val intent = if (hasCallPermission) {
-                Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(cleanNumber)}"))
+            if (hasCallPermission) {
+                val callIntent = Intent(Intent.ACTION_CALL, Uri.parse("tel:${Uri.encode(cleanNumber)}")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(callIntent)
             } else {
-                Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(cleanNumber)}"))
+                // If permission is not granted yet, use ACTION_DIAL fallback
+                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(cleanNumber)}")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(dialIntent)
             }
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            context.startActivity(intent)
         } catch (e: Exception) {
             try {
-                // Fallback to dial intent
-                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(cleanNumber)}"))
-                dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val dialIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(cleanNumber)}")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
                 context.startActivity(dialIntent)
             } catch (fallbackEx: Exception) {
-                Toast.makeText(context, "Could not open dialer: ${fallbackEx.localizedMessage}", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Could not place call: ${fallbackEx.localizedMessage}", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -58,7 +71,15 @@ object CallHelper {
         }
     }
 
-    fun openWhatsApp(context: Context, phoneNumber: String, message: String = "") {
+    /**
+     * Opens user's preferred WhatsApp application (WhatsApp or WhatsApp Business)
+     */
+    fun openWhatsApp(
+        context: Context,
+        phoneNumber: String,
+        preferredPackage: String? = null,
+        message: String = ""
+    ) {
         val cleanNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
         val normalized = if (cleanNumber.startsWith("+")) cleanNumber.substring(1) else cleanNumber
         try {
@@ -67,37 +88,40 @@ object CallHelper {
             } else {
                 "https://api.whatsapp.com/send?phone=$normalized"
             }
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                if (!preferredPackage.isNullOrBlank()) {
+                    setPackage(preferredPackage)
+                }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
             context.startActivity(intent)
         } catch (e: Exception) {
             try {
-                // Fallback to generic action send
-                val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, message)
-                    setPackage("com.whatsapp")
+                // Fallback without package restriction
+                val genericIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$normalized")).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                context.startActivity(sendIntent)
+                context.startActivity(genericIntent)
             } catch (fallbackEx: Exception) {
-                Toast.makeText(context, "WhatsApp is not installed", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "WhatsApp is not installed on this device", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
     fun formatDaysAgo(timestamp: Long): String {
-        if (timestamp <= 0L) return "Never contacted yet"
+        if (timestamp <= 0L) return "Never contacted"
         val now = System.currentTimeMillis()
         val diffMs = now - timestamp
         if (diffMs < 0L) return "Today"
         val days = (diffMs / (24 * 60 * 60 * 1000L)).toInt()
+        val hours = (diffMs / (60 * 60 * 1000L)).toInt()
         return when {
-            days == 0 -> "Contacted today"
-            days == 1 -> "1 day ago"
+            hours < 1 -> "Just now"
+            days == 0 -> "Today"
+            days == 1 -> "Yesterday"
             days < 30 -> "$days days ago"
-            days < 365 -> "${days / 30} months ago"
-            else -> "${days / 365} years ago"
+            days < 365 -> "${days / 30} mo ago"
+            else -> "${days / 365} yr ago"
         }
     }
 

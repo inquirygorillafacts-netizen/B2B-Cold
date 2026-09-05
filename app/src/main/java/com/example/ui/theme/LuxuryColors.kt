@@ -83,3 +83,116 @@ val GoldAccentGradient = Brush.horizontalGradient(
 val LightAmbientGoldRadial = Color(0xFFF59E0B)
 val LightAmbientEmeraldRadial = Color(0xFF10B981)
 val LightAmbientBlueRadial = Color(0xFF3B82F6)
+
+// Modern Clean Light Canvas & Elevated Card Tokens
+val ModernCanvasBgStart = Color(0xFFF8FAFC)
+val ModernCanvasBgMid = Color(0xFFF1F5F9)
+val ModernCanvasBgEnd = Color(0xFFE2E8F0)
+
+val ModernCardBorder = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFFE2E8F0),
+        Color(0xFFCBD5E1)
+    )
+)
+
+val ModernAvatarGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF4F46E5), // Indigo
+        Color(0xFF2563EB), // Electric Blue
+        Color(0xFF06B6D4)  // Cyan
+    )
+)
+
+// Ultra-Modern Executive Glass & Gradient Tokens
+val ExecutiveCanvasBg = Color(0xFFF8FAFC)
+val ExecutiveCanvasDark = Color(0xFF0F172A)
+val ExecutiveCardSurface = Color(0xFFFFFFFF)
+val ExecutiveGlassBorder = Color(0xFFE2E8F0)
+
+// Modern Minimalist Card & Component Tokens
+val RomanticChampagneBorder = Color(0xFFE2E8F0)
+val RomanticCardSurfaceBg = Color(0xFFFFFFFF)
+val RomanticAvatarGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF4F46E5),
+        Color(0xFF3B82F6),
+        Color(0xFF06B6D4)
+    )
+)
+val RomanticChampagnePill = Color(0xFFF1F5F9)
+val RomanticChampagneText = Color(0xFF475569)
+val RomanticTouchpointBg = Color(0xFFF8FAFC)
+val RomanticTouchpointText = Color(0xFF0F172A)
+val RomanticGoldAccent = Color(0xFFD97706)
+
+val IridescentCardBorder = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF38BDF8).copy(alpha = 0.5f),
+        Color(0xFF818CF8).copy(alpha = 0.35f),
+        Color(0xFF34D399).copy(alpha = 0.45f)
+    )
+)
+
+val GoldenShimmerGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFFF59E0B),
+        Color(0xFFFBBF24),
+        Color(0xFFD97706)
+    )
+)
+
+val ExecutiveAvatarGradient = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFF1E40AF),
+        Color(0xFF3B82F6),
+        Color(0xFF06B6D4)
+    )
+)
+
+val HeroCallButtonGradient = Brush.horizontalGradient(
+    colors = listOf(
+        Color(0xFF059669),
+        Color(0xFF10B981),
+        Color(0xFF0D9488)
+    )
+)
+
+// RGB Glass & Futuristic Prismatic Palette
+val RgbSpectrumColors = listOf(
+    Color(0xFFFF0055), // Vibrant Red-Pink
+    Color(0xFF8B5CF6), // Violet
+    Color(0xFF3B82F6), // Electric Blue
+    Color(0xFF06B6D4), // Cyan
+    Color(0xFF10B981), // Emerald
+    Color(0xFFF59E0B), // Amber
+    Color(0xFFFF0055)  // Back to Red-Pink
+)
+
+val RgbGlassBorder = Brush.linearGradient(
+    colors = listOf(
+        Color(0xFFFF007A).copy(alpha = 0.8f),
+        Color(0xFF7928CA).copy(alpha = 0.8f),
+        Color(0xFF0070F3).copy(alpha = 0.8f),
+        Color(0xFF00DFD8).copy(alpha = 0.8f),
+        Color(0xFF10B981).copy(alpha = 0.8f)
+    )
+)
+
+val RgbGlassCardBg = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFFFFFFFF).copy(alpha = 0.92f),
+        Color(0xFFF8FAFC).copy(alpha = 0.85f),
+        Color(0xFFF1F5F9).copy(alpha = 0.95f)
+    )
+)
+
+val DarkRgbGlassCardBg = Brush.verticalGradient(
+    colors = listOf(
+        Color(0xFF131826).copy(alpha = 0.94f),
+        Color(0xFF0F172A).copy(alpha = 0.96f),
+        Color(0xFF090D16).copy(alpha = 0.98f)
+    )
+)
+
+

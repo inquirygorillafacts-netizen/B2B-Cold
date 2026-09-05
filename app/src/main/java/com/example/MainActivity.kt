@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,38 +14,35 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.ui.AppTab
+import com.example.data.local.ClientEntity
+import com.example.model.CardAnimationStyle
 import com.example.ui.CallingViewModel
-import com.example.ui.components.CallLogView
-import com.example.ui.components.ContactsView
-import com.example.ui.components.DialpadSheet
-import com.example.ui.components.LuxuryBottomNavigationBar
+import com.example.ui.components.ContactsPermissionGateScreen
+import com.example.ui.components.DeckStudioModal
 import com.example.ui.components.LuxuryClientCardDeck
 import com.example.ui.components.LuxuryExecutiveHeader
 import com.example.ui.components.LuxuryOnboardingFlow
-import com.example.ui.components.LuxuryPermissionPromptFlow
-import com.example.ui.components.LuxurySettingsModalSheet
-import com.example.ui.components.ProfileView
-import com.example.ui.theme.LuxuryBlue
-import com.example.ui.theme.LuxuryEmerald
+import com.example.ui.components.LuxurySettingsScreen
+import com.example.ui.components.ModernSyncProgressDialog
+import com.example.ui.components.PayUSubscriptionSheet
+import com.example.ui.components.WhatsAppPreferenceDialog
 import com.example.ui.theme.LuxuryLightCanvas
 import com.example.ui.theme.MyApplicationTheme
 import com.example.util.CallHelper
@@ -71,32 +69,46 @@ fun TenMillionClientDeckApp(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    // State collections
+    // Reactive State collections
     val hasCompletedOnboarding by viewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
     val permissionState by viewModel.permissionState.collectAsStateWithLifecycle()
-    val currentTab by viewModel.currentTab.collectAsStateWithLifecycle()
     val randomClient by viewModel.currentRandomClient.collectAsStateWithLifecycle()
     val rotationClients by viewModel.rotationClients.collectAsStateWithLifecycle()
     val allClients by viewModel.allClients.collectAsStateWithLifecycle()
-    val filteredClients by viewModel.filteredClients.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
-    val profileSubSection by viewModel.profileSubSection.collectAsStateWithLifecycle()
-    val callLogs by viewModel.callLogs.collectAsStateWithLifecycle()
-    val callLogFilter by viewModel.callLogFilter.collectAsStateWithLifecycle()
-    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
 
-    val cardAnimationStyle by viewModel.cardAnimationStyle.collectAsStateWithLifecycle()
-    val showSettingsSheet by viewModel.showSettingsSheet.collectAsStateWithLifecycle()
-    val showDialpad by viewModel.showInAppDialer.collectAsStateWithLifecycle()
-    val dialpadInput by viewModel.dialpadInput.collectAsStateWithLifecycle()
-    val allContacts by viewModel.contacts.collectAsStateWithLifecycle()
+    val subscriptionState by viewModel.subscriptionState.collectAsStateWithLifecycle()
+    val showPayUSheet by viewModel.showPayUSheet.collectAsStateWithLifecycle()
+    val lastSyncTimeString by viewModel.lastSyncTimeString.collectAsStateWithLifecycle()
+
+    val isSettingsScreenOpen by viewModel.isSettingsScreenOpen.collectAsStateWithLifecycle()
 
     val clientVoiceNotes by viewModel.currentClientVoiceNotes.collectAsStateWithLifecycle()
     val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val recordingState by viewModel.recordingState.collectAsStateWithLifecycle()
 
-    var permissionBypassed by remember { mutableStateOf(false) }
+    // 10 Card Physics and WhatsApp Preference
+    val cardAnimationStyle by viewModel.cardAnimationStyle.collectAsStateWithLifecycle()
+    val preferredWhatsAppPackage by viewModel.preferredWhatsAppPackage.collectAsStateWithLifecycle()
+    val pendingWhatsAppClient by viewModel.pendingWhatsAppClient.collectAsStateWithLifecycle()
+    val syncProgressState by viewModel.syncProgressState.collectAsStateWithLifecycle()
+
+    var hasAttemptedPermissionRequest by remember { mutableStateOf(false) }
+    var pendingCallClient by remember { mutableStateOf<ClientEntity?>(null) }
+    var showDeckStudioModal by remember { mutableStateOf(false) }
+
+    // Direct Call Phone launcher (so tapping call immediately dials without opening external dialer)
+    val callPhoneLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        pendingCallClient?.let { client ->
+            CallHelper.makeDirectCall(context, client.number)
+            viewModel.recordClientContacted(client.id)
+        }
+        pendingCallClient = null
+    }
 
     // Next client in stack for 3D stack & drag reveal effect
     val nextClient = remember(randomClient, rotationClients) {
@@ -104,46 +116,63 @@ fun TenMillionClientDeckApp(
         if (pool.isNotEmpty()) pool.first() else null
     }
 
-    // Permission launcher for high-value contacts & audio recording
+    // Primary permission launcher for contacts, audio & direct calling
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { perms ->
+        hasAttemptedPermissionRequest = true
         val contactsGranted = perms[Manifest.permission.READ_CONTACTS] == true
         val audioGranted = perms[Manifest.permission.RECORD_AUDIO] == true
         viewModel.updatePermissions(
             hasContacts = contactsGranted,
-            hasCallLog = true,
-            hasCallPhone = true,
             hasRecordAudio = audioGranted
         )
+        if (contactsGranted) {
+            viewModel.syncContactsNow()
+        }
     }
 
-    fun requestAllPermissions() {
+    fun requestRequiredPermissions() {
+        hasAttemptedPermissionRequest = true
         permissionLauncher.launch(
             arrayOf(
                 Manifest.permission.READ_CONTACTS,
-                Manifest.permission.RECORD_AUDIO
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.CALL_PHONE
             )
         )
     }
 
-    // Check permissions on start
-    LaunchedEffect(Unit) {
-        val hasContacts = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_CONTACTS
-        ) == PackageManager.PERMISSION_GRANTED
-        val hasRecordAudio = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECORD_AUDIO
-        ) == PackageManager.PERMISSION_GRANTED
+    // Re-check permissions on resume (e.g. when user returns from Device Settings)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                val hasContacts = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_CONTACTS
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasAudio = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
 
-        viewModel.updatePermissions(
-            hasContacts = hasContacts,
-            hasCallLog = true,
-            hasCallPhone = true,
-            hasRecordAudio = hasRecordAudio
-        )
+                viewModel.updatePermissions(
+                    hasContacts = hasContacts,
+                    hasRecordAudio = hasAudio
+                )
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Handle back button when on dedicated Settings screen
+    if (isSettingsScreenOpen) {
+        BackHandler {
+            viewModel.closeSettingsScreen()
+        }
     }
 
     Box(
@@ -152,7 +181,7 @@ fun TenMillionClientDeckApp(
             .background(LuxuryLightCanvas)
             .testTag("app_root_container")
     ) {
-        // STEP 1: Ultra-Slick Colorful 5-Slide Onboarding Flow on White Canvas
+        // STEP 1: Ultra-Slick 5-Slide Onboarding Flow
         if (!hasCompletedOnboarding) {
             LuxuryOnboardingFlow(
                 onComplete = {
@@ -162,186 +191,29 @@ fun TenMillionClientDeckApp(
             return@Box
         }
 
-        // STEP 2: Frictionless 2-Card Permission Prompt Flow
-        if (permissionState.isAnyMissing && !permissionBypassed) {
-            LuxuryPermissionPromptFlow(
-                permissionState = permissionState,
-                onRequestPermissions = { requestAllPermissions() },
-                onContinueAnyway = {
-                    permissionBypassed = true
-                }
+        // STEP 2: Contacts Permission Gatekeeper Screen (Zero bypass without contacts permission)
+        if (!permissionState.hasContacts) {
+            ContactsPermissionGateScreen(
+                hasAskedPermission = hasAttemptedPermissionRequest,
+                onRequestPermission = { requestRequiredPermissions() }
             )
             return@Box
         }
 
-        // STEP 3: Complete App Structure with Top Safe Header + Bottom Navigation Bar
-        Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = Color.White,
-            topBar = {
-                // Header with safe statusBarsPadding (never overlaps SIM, battery, status icons)
-                LuxuryExecutiveHeader(
-                    callsDoneToday = userProfile.callsMadeToday,
-                    dailyGoal = userProfile.dailyCallGoal,
-                    onOpenSettings = {
-                        viewModel.toggleSettingsSheet(true)
-                    },
-                    onOpenDialpad = {
-                        viewModel.toggleInAppDialer(true)
-                    },
-                    onRotateNext = {
-                        viewModel.pickRandomClient()
-                    }
-                )
-            },
-            bottomBar = {
-                // Professional bottom navigation bar (Deck, Call Log, Clients, Profile)
-                LuxuryBottomNavigationBar(
-                    currentTab = currentTab,
-                    onTabSelected = { tab ->
-                        viewModel.setTab(tab)
-                    }
-                )
-            }
-        ) { innerPadding ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                when (currentTab) {
-                    AppTab.HOME -> {
-                        // Subtle ambient light glows
-                        Box(
-                            modifier = Modifier
-                                .size(360.dp)
-                                .align(Alignment.TopCenter)
-                                .blur(110.dp)
-                                .background(LuxuryBlue.copy(alpha = 0.04f), CircleShape)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(340.dp)
-                                .align(Alignment.BottomCenter)
-                                .blur(110.dp)
-                                .background(LuxuryEmerald.copy(alpha = 0.04f), CircleShape)
-                        )
-
-                        // 3D Swipeable Hero Client Card Deck
-                        LuxuryClientCardDeck(
-                            client = randomClient,
-                            nextClient = nextClient,
-                            animationStyle = cardAnimationStyle,
-                            voiceNotes = clientVoiceNotes,
-                            playbackState = playbackState,
-                            recordingState = recordingState,
-                            onCallClick = { client ->
-                                viewModel.callClient(context, client)
-                            },
-                            onWhatsAppClick = { client ->
-                                viewModel.openWhatsApp(context, client)
-                            },
-                            onPlayVoiceNote = { note ->
-                                viewModel.playVoiceNote(note)
-                            },
-                            onStopPlayback = {
-                                viewModel.stopAudioPlayback()
-                            },
-                            onStartRecording = {
-                                viewModel.startRecordingVoiceNote()
-                            },
-                            onStopRecording = { clientId, summary ->
-                                viewModel.stopRecordingVoiceNote(clientId, summary)
-                            },
-                            onCancelRecording = {
-                                viewModel.cancelRecordingVoiceNote()
-                            },
-                            onSwipeNext = {
-                                viewModel.pickRandomClient()
-                            }
-                        )
-                    }
-
-                    AppTab.CALL_LOG -> {
-                        CallLogView(
-                            logs = callLogs,
-                            selectedFilter = callLogFilter,
-                            onFilterSelect = { filter ->
-                                viewModel.setCallLogFilter(filter)
-                            },
-                            onCallClick = { number ->
-                                CallHelper.makeCall(context, number)
-                            },
-                            onSmsClick = { number ->
-                                CallHelper.sendSms(context, number)
-                            },
-                            onCopyClick = { number ->
-                                CallHelper.copyToClipboard(context, number)
-                            },
-                            onOpenDialpadClick = { number ->
-                                viewModel.setDialpadInput(number)
-                                viewModel.toggleInAppDialer(true)
-                            }
-                        )
-                    }
-
-                    AppTab.CONTACTS -> {
-                        ContactsView(
-                            clients = filteredClients,
-                            searchQuery = searchQuery,
-                            onSearchChange = { q ->
-                                viewModel.setSearchQuery(q)
-                            },
-                            onSelectClient = { client ->
-                                viewModel.selectClientForCard(client)
-                            },
-                            onCallClick = { client ->
-                                viewModel.callClient(context, client)
-                            },
-                            onWhatsAppClick = { client ->
-                                viewModel.openWhatsApp(context, client)
-                            },
-                            onSmsClick = { client ->
-                                CallHelper.sendSms(context, client.number)
-                            },
-                            onOpenDialpadClick = { number ->
-                                viewModel.setDialpadInput(number)
-                                viewModel.toggleInAppDialer(true)
-                            }
-                        )
-                    }
-
-                    AppTab.PROFILE -> {
-                        ProfileView(
-                            userProfile = userProfile,
-                            currentSubSection = profileSubSection,
-                            allClients = allClients,
-                            onSelectSubSection = { section ->
-                                viewModel.setProfileSubSection(section)
-                            },
-                            onUpdateProfile = { name, title, company, email, phone, dailyGoal ->
-                                viewModel.updateUserProfile(name, title, company, email, phone, dailyGoal)
-                            },
-                            onToggleClientRotation = { clientId, isChecked ->
-                                viewModel.toggleClientRotation(clientId, isChecked)
-                            },
-                            onSetAllClientsRotation = { isChecked ->
-                                viewModel.setAllClientsRotation(isChecked)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // STEP 4: Settings & Card Animation Studio (Header Only Modal Sheet)
-        if (showSettingsSheet) {
-            LuxurySettingsModalSheet(
-                selectedStyle = cardAnimationStyle,
+        // STEP 3: Dedicated Settings Page (10 Card Physics, Contacts, WhatsApp choice & VIP)
+        if (isSettingsScreenOpen) {
+            LuxurySettingsScreen(
                 dailyGoal = userProfile.dailyCallGoal,
                 allClients = allClients,
-                onSelectStyle = { style ->
+                subscriptionState = subscriptionState,
+                lastSyncTimeString = lastSyncTimeString,
+                cardAnimationStyle = cardAnimationStyle,
+                preferredWhatsAppPackage = preferredWhatsAppPackage,
+                onSelectCardAnimationStyle = { style ->
                     viewModel.setCardAnimationStyle(style)
+                },
+                onSelectPreferredWhatsAppPackage = { pkg ->
+                    viewModel.setPreferredWhatsAppPackage(pkg)
                 },
                 onSelectDailyGoal = { goal ->
                     viewModel.setDailyCallGoal(goal)
@@ -352,41 +224,155 @@ fun TenMillionClientDeckApp(
                 onSelectAllClients = { isChecked ->
                     viewModel.setAllClientsRotation(isChecked)
                 },
+                onAddNewContact = { name, number, company, designation ->
+                    viewModel.addNewContact(name, number, company, designation)
+                },
+                onSyncContactsNow = {
+                    viewModel.syncContactsNow()
+                },
+                onOpenPayUSheet = {
+                    viewModel.togglePayUSheet(true)
+                },
                 onResetOnboarding = {
                     viewModel.resetOnboarding()
                 },
+                onNavigateBack = {
+                    viewModel.closeSettingsScreen()
+                }
+            )
+            return@Box
+        }
+
+        // STEP 4: Pure Clean Card Deck Screen (No Navigation Bar, Open & Spacious Canvas)
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color(0xFFF8FAFC),
+            topBar = {
+                // Minimal Header: Remaining Calls Badge + Quick Subscription Pill + Settings Studio
+                LuxuryExecutiveHeader(
+                    callsDoneToday = userProfile.callsMadeToday,
+                    dailyGoal = userProfile.dailyCallGoal,
+                    subscriptionState = subscriptionState,
+                    onOpenSettings = {
+                        viewModel.openSettingsScreen()
+                    },
+                    onOpenSubscription = {
+                        viewModel.togglePayUSheet(true)
+                    },
+                    onOpenDeckStudio = {
+                        showDeckStudioModal = true
+                    },
+                    onSyncClick = {
+                        viewModel.syncContactsNow()
+                    }
+                )
+            }
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFFF8FAFC),
+                                Color(0xFFF1F5F9),
+                                Color(0xFFE2E8F0)
+                            )
+                        )
+                    )
+                    .padding(innerPadding)
+            ) {
+                // Silky smooth, highly optimized Romantic Card Deck with User's Chosen Dynamic Physics
+                LuxuryClientCardDeck(
+                    client = randomClient,
+                    nextClient = nextClient,
+                    animationStyle = cardAnimationStyle,
+                    voiceNotes = clientVoiceNotes,
+                    playbackState = playbackState,
+                    recordingState = recordingState,
+                    onCallClick = { client ->
+                        // Direct call without opening dialer app
+                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
+                            CallHelper.makeDirectCall(context, client.number)
+                            viewModel.recordClientContacted(client.id)
+                        } else {
+                            pendingCallClient = client
+                            callPhoneLauncher.launch(Manifest.permission.CALL_PHONE)
+                        }
+                    },
+                    onWhatsAppClick = { client ->
+                        viewModel.openWhatsApp(context, client)
+                    },
+                    onSnoozeClick = { client, days ->
+                        viewModel.snoozeClient(client, days)
+                    },
+                    onPlayVoiceNote = { note ->
+                        viewModel.playVoiceNote(note)
+                    },
+                    onStopPlayback = {
+                        viewModel.stopAudioPlayback()
+                    },
+                    onStartRecording = {
+                        viewModel.startRecordingVoiceNote()
+                    },
+                    onStopRecording = { clientId, summary ->
+                        viewModel.stopRecordingVoiceNote(clientId, summary)
+                    },
+                    onCancelRecording = {
+                        viewModel.cancelRecordingVoiceNote()
+                    },
+                    onDeleteVoiceNote = { noteId ->
+                        viewModel.deleteVoiceNote(noteId)
+                    },
+                    onSwipeNext = {
+                        viewModel.pickRandomClient()
+                    }
+                )
+            }
+        }
+
+        // STEP 5: PayU Subscription Payment Sheet (₹49, ₹199 Popular, ₹499)
+        if (showPayUSheet) {
+            PayUSubscriptionSheet(
+                subscriptionState = subscriptionState,
+                onActivatePlan = { plan, txId ->
+                    viewModel.activateSubscription(plan, txId)
+                },
                 onDismiss = {
-                    viewModel.toggleSettingsSheet(false)
+                    viewModel.togglePayUSheet(false)
                 }
             )
         }
 
-        // In-App Dialpad Bottom Sheet (Accessible from Header)
-        if (showDialpad) {
-            DialpadSheet(
-                inputNumber = dialpadInput,
-                suggestions = allContacts.filter {
-                    val clean = dialpadInput.replace(Regex("[^0-9+]"), "")
-                    clean.isNotEmpty() && (it.number.contains(clean) || it.name.lowercase().contains(dialpadInput.lowercase()))
-                }.take(3),
-                onDigitClick = { digit ->
-                    viewModel.onDialDigit(digit)
-                },
-                onBackspaceClick = {
-                    viewModel.onDialBackspace()
-                },
-                onClearAll = {
-                    viewModel.onDialClear()
-                },
-                onCallClick = { number ->
-                    viewModel.toggleInAppDialer(false)
-                    CallHelper.makeCall(context, number)
-                },
-                onSelectSuggestion = { contact ->
-                    viewModel.setDialpadInput(contact.number)
+        // STEP 6: Modern Sync Progress Dialog (Animated Percentage Ring & Confetti)
+        ModernSyncProgressDialog(
+            syncState = syncProgressState,
+            onDismiss = {
+                viewModel.dismissSyncDialog()
+            }
+        )
+
+        // STEP 7: WhatsApp Application Preference Dialog (Choice stored, ask once)
+        if (pendingWhatsAppClient != null) {
+            WhatsAppPreferenceDialog(
+                onSelectOption = { pkg, rememberChoice ->
+                    viewModel.selectWhatsAppPreference(context, pkg, rememberChoice)
                 },
                 onDismiss = {
-                    viewModel.toggleInAppDialer(false)
+                    viewModel.dismissWhatsAppPicker()
+                }
+            )
+        }
+
+        // STEP 8: 10 Card Physics Deck Studio Modal
+        if (showDeckStudioModal) {
+            DeckStudioModal(
+                currentStyle = cardAnimationStyle,
+                onSelectStyle = { style ->
+                    viewModel.setCardAnimationStyle(style)
+                },
+                onDismiss = {
+                    showDeckStudioModal = false
                 }
             )
         }

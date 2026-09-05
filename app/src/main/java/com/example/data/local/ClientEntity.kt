@@ -16,5 +16,6 @@ data class ClientEntity(
     val lastContactedTimestamp: Long,
     val isInRotation: Boolean = true,
     val isStarred: Boolean = false,
-    val photoUri: String? = null
+    val photoUri: String? = null,
+    val snoozeUntilTimestamp: Long = 0L
 )

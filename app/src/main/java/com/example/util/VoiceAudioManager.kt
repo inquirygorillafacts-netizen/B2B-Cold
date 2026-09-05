@@ -160,7 +160,7 @@ class VoiceAudioManager(private val context: Context) {
     fun startRecording(): Boolean {
         stopPlayback()
         try {
-            val voiceDir = File(context.cacheDir, "voice_notes").apply { mkdirs() }
+            val voiceDir = File(context.filesDir, "voice_notes").apply { mkdirs() }
             val file = File(voiceDir, "vn_${System.currentTimeMillis()}.m4a")
             currentRecordingFile = file
 
@@ -200,7 +200,7 @@ class VoiceAudioManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e("VoiceAudioManager", "Failed to start audio recording: ${e.message}")
             // Fallback for emulator without hardware mic: simulate recording
-            val voiceDir = File(context.cacheDir, "voice_notes").apply { mkdirs() }
+            val voiceDir = File(context.filesDir, "voice_notes").apply { mkdirs() }
             val file = File(voiceDir, "demo_vn_${System.currentTimeMillis()}.m4a")
             file.writeText("simulated_voice_note")
             currentRecordingFile = file

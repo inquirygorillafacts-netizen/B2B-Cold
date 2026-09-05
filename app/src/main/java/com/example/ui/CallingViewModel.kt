@@ -4,87 +4,77 @@ import android.app.Application
 import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.data.CallLogRepository
 import com.example.data.ClientRelationshipRepository
 import com.example.data.ContactsRepository
 import com.example.data.UserProfileData
 import com.example.data.local.ClientEntity
 import com.example.data.local.VoiceNoteEntity
-import com.example.model.CallLogItem
-import com.example.model.CallType
+import com.example.model.CardAnimationStyle
 import com.example.model.ContactItem
 import com.example.util.CallHelper
 import com.example.util.PlaybackState
 import com.example.util.RecordingState
 import com.example.util.VoiceAudioManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
-enum class AppTab(val title: String) {
-    HOME("Home"),
-    CALL_LOG("Call Log"),
-    CONTACTS("Contacts"),
-    PROFILE("Profile")
-}
-
-enum class ProfileSubSection(val title: String) {
-    OVERVIEW("Profile"),
-    EDIT_PROFILE("Edit Profile"),
-    SUBSCRIPTION("App Subscription"),
-    SETTINGS("Client Card Settings")
-}
-
 data class PermissionState(
     val hasContacts: Boolean = false,
-    val hasCallLog: Boolean = false,
-    val hasCallPhone: Boolean = false,
     val hasRecordAudio: Boolean = false
-) {
-    val isAnyMissing: Boolean
-        get() = !hasContacts || !hasCallLog || !hasCallPhone || !hasRecordAudio
+)
 
-    val isAllGranted: Boolean
-        get() = hasContacts && hasCallLog && hasCallPhone && hasRecordAudio
-}
+data class SyncProgressState(
+    val isSyncing: Boolean = false,
+    val progressPercent: Int = 0,
+    val statusMessage: String = "",
+    val isCompleted: Boolean = false
+)
 
 class CallingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val contactsRepo = ContactsRepository(application)
-    private val callLogRepo = CallLogRepository(application)
     private val clientRepo = ClientRelationshipRepository(application)
     private val audioManager = VoiceAudioManager(application)
 
     private val _permissionState = MutableStateFlow(
         PermissionState(
             hasContacts = contactsRepo.hasContactsPermission(),
-            hasCallLog = callLogRepo.hasCallLogPermission(),
-            hasCallPhone = false,
             hasRecordAudio = false
         )
     )
     val permissionState: StateFlow<PermissionState> = _permissionState.asStateFlow()
 
-    // Default opened tab is HOME as specified in PRD
-    private val _currentTab = MutableStateFlow(AppTab.HOME)
-    val currentTab: StateFlow<AppTab> = _currentTab.asStateFlow()
-
-    // Sub-section within Profile tab
-    private val _profileSubSection = MutableStateFlow(ProfileSubSection.OVERVIEW)
-    val profileSubSection: StateFlow<ProfileSubSection> = _profileSubSection.asStateFlow()
-
     private val _userProfile = MutableStateFlow(UserProfileData())
     val userProfile: StateFlow<UserProfileData> = _userProfile.asStateFlow()
+
+    // Real-time animated sync progress state
+    private val _syncProgressState = MutableStateFlow(SyncProgressState())
+    val syncProgressState: StateFlow<SyncProgressState> = _syncProgressState.asStateFlow()
+
+    // 10-Card Physics swipe dynamics
+    private val _cardAnimationStyle = MutableStateFlow(clientRepo.getCardAnimationStyle())
+    val cardAnimationStyle: StateFlow<CardAnimationStyle> = _cardAnimationStyle.asStateFlow()
+
+    // WhatsApp preference (WhatsApp Messenger vs WhatsApp Business)
+    private val _preferredWhatsAppPackage = MutableStateFlow(clientRepo.getPreferredWhatsAppPackage())
+    val preferredWhatsAppPackage: StateFlow<String?> = _preferredWhatsAppPackage.asStateFlow()
+
+    private val _pendingWhatsAppClient = MutableStateFlow<ClientEntity?>(null)
+    val pendingWhatsAppClient: StateFlow<ClientEntity?> = _pendingWhatsAppClient.asStateFlow()
 
     val allClients: StateFlow<List<ClientEntity>> = clientRepo.allClients
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val rotationClients: StateFlow<List<ClientEntity>> = clientRepo.rotationClients
+    val rotationClients: StateFlow<List<ClientEntity>> = clientRepo.getRotationClients()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _currentRandomClient = MutableStateFlow<ClientEntity?>(null)
@@ -99,37 +89,31 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     private val _contacts = MutableStateFlow<List<ContactItem>>(emptyList())
     val contacts: StateFlow<List<ContactItem>> = _contacts.asStateFlow()
 
-    private val _callLogs = MutableStateFlow<List<CallLogItem>>(emptyList())
-    val callLogs: StateFlow<List<CallLogItem>> = _callLogs.asStateFlow()
-
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
 
-    private val _callLogFilter = MutableStateFlow<CallType?>(null)
-    val callLogFilter: StateFlow<CallType?> = _callLogFilter.asStateFlow()
-
-    private val _dialpadInput = MutableStateFlow("")
-    val dialpadInput: StateFlow<String> = _dialpadInput.asStateFlow()
-
-    private val _showInAppDialer = MutableStateFlow(false)
-    val showInAppDialer: StateFlow<Boolean> = _showInAppDialer.asStateFlow()
-
-    // 5-Slide Ultra-Slick Onboarding State
+    // 5-Slide Onboarding State
     private val _hasCompletedOnboarding = MutableStateFlow(false)
     val hasCompletedOnboarding: StateFlow<Boolean> = _hasCompletedOnboarding.asStateFlow()
 
-    // 10 Card Physics & Animation Styles
-    private val _cardAnimationStyle = MutableStateFlow(com.example.model.CardAnimationStyle.LIQUID_GLASS_STACK)
-    val cardAnimationStyle: StateFlow<com.example.model.CardAnimationStyle> = _cardAnimationStyle.asStateFlow()
+    // Dedicated Settings Page State (Full Screen Navigation)
+    private val _isSettingsScreenOpen = MutableStateFlow(false)
+    val isSettingsScreenOpen: StateFlow<Boolean> = _isSettingsScreenOpen.asStateFlow()
 
-    // Luxury Settings Overlay (Header Only Triggered)
-    private val _showSettingsSheet = MutableStateFlow(false)
-    val showSettingsSheet: StateFlow<Boolean> = _showSettingsSheet.asStateFlow()
+    // PayU Subscription State & Modal
+    private val _subscriptionState = MutableStateFlow(clientRepo.getSubscriptionState())
+    val subscriptionState: StateFlow<com.example.model.SubscriptionState> = _subscriptionState.asStateFlow()
 
-    // Filtered B2B clients list for Contacts screen
+    private val _showPayUSheet = MutableStateFlow(false)
+    val showPayUSheet: StateFlow<Boolean> = _showPayUSheet.asStateFlow()
+
+    private val _lastSyncTimeString = MutableStateFlow(clientRepo.getLastSyncTimeString())
+    val lastSyncTimeString: StateFlow<String> = _lastSyncTimeString.asStateFlow()
+
+    // Filtered B2B clients list for search - computed on Dispatchers.Default for maximum speed
     val filteredClients: StateFlow<List<ClientEntity>> = combine(
         allClients,
         _searchQuery
@@ -145,25 +129,9 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
                         it.number.replace(" ", "").contains(q)
             }
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val filteredCallLogs: StateFlow<List<CallLogItem>> = combine(
-        _callLogs,
-        _callLogFilter,
-        _searchQuery
-    ) { logs, filter, query ->
-        var list = logs
-        if (filter != null) {
-            list = list.filter { it.type == filter }
-        }
-        if (query.isNotBlank()) {
-            val q = query.trim().lowercase()
-            list = list.filter {
-                (it.cachedName?.lowercase()?.contains(q) == true) || it.number.contains(q)
-            }
-        }
-        list
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         initializeData()
@@ -171,29 +139,89 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
 
     private fun initializeData() {
         viewModelScope.launch {
-            _isLoading.value = true
             try {
-                clientRepo.ensureInitialData()
-                val fetchedContacts = contactsRepo.getContacts()
-                val fetchedLogs = callLogRepo.getCallLogs()
-                _contacts.value = fetchedContacts
-                _callLogs.value = fetchedLogs
-
-                // Observe rotation clients and pick first random client if not set
-                rotationClients.collect { list ->
-                    if (list.isNotEmpty() && _currentRandomClient.value == null) {
-                        pickRandomClientFromList(list)
-                    } else if (list.isNotEmpty() && _currentRandomClient.value?.let { curr -> list.none { it.id == curr.id } } == true) {
-                        // Current client was removed from rotation
-                        pickRandomClientFromList(list)
-                    }
+                if (contactsRepo.hasContactsPermission()) {
+                    clientRepo.syncDeviceContacts(force = true)
+                } else {
+                    clientRepo.ensureInitialData()
                 }
+                _lastSyncTimeString.value = clientRepo.getLastSyncTimeString()
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+
+        // Observe rotation clients reactive flow
+        viewModelScope.launch {
+            rotationClients.collect { list ->
+                if (list.isNotEmpty() && _currentRandomClient.value == null) {
+                    pickRandomClientFromList(list)
+                } else if (list.isNotEmpty() && _currentRandomClient.value?.let { curr -> list.none { it.id == curr.id } } == true) {
+                    pickRandomClientFromList(list)
+                }
+            }
+        }
+    }
+
+    fun setCardAnimationStyle(style: CardAnimationStyle) {
+        _cardAnimationStyle.value = style
+        clientRepo.setCardAnimationStyle(style)
+    }
+
+    fun setPreferredWhatsAppPackage(pkg: String?) {
+        _preferredWhatsAppPackage.value = pkg
+        clientRepo.setPreferredWhatsAppPackage(pkg)
+    }
+
+    fun syncContactsNow() {
+        viewModelScope.launch {
+            _syncProgressState.value = SyncProgressState(
+                isSyncing = true,
+                progressPercent = 8,
+                statusMessage = "Connecting to device phonebook...",
+                isCompleted = false
+            )
+            _isLoading.value = true
+            try {
+                // Real sync with progressive updates
+                clientRepo.syncDeviceContacts(force = true) { percent, msg ->
+                    _syncProgressState.value = _syncProgressState.value.copy(
+                        progressPercent = percent,
+                        statusMessage = msg,
+                        isCompleted = percent >= 100
+                    )
+                }
+                _lastSyncTimeString.value = clientRepo.getLastSyncTimeString()
+                delay(700) // allow user to see 100% completion
+            } catch (e: Exception) {
+                _syncProgressState.value = _syncProgressState.value.copy(
+                    progressPercent = 100,
+                    statusMessage = "Sync completed",
+                    isCompleted = true
+                )
             } finally {
                 _isLoading.value = false
             }
         }
+    }
+
+    fun dismissSyncDialog() {
+        _syncProgressState.value = SyncProgressState(isSyncing = false)
+    }
+
+    fun addNewContact(name: String, number: String, company: String, designation: String) {
+        viewModelScope.launch {
+            clientRepo.addNewContact(name, number, company, designation)
+        }
+    }
+
+    fun togglePayUSheet(show: Boolean) {
+        _showPayUSheet.value = show
+    }
+
+    fun activateSubscription(plan: com.example.model.SubscriptionPlan, txId: String) {
+        clientRepo.activateSubscription(plan, txId)
+        _subscriptionState.value = clientRepo.getSubscriptionState()
     }
 
     fun pickRandomClient() {
@@ -206,24 +234,21 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 pool
             }
-            val randomClient = eligible[Random.nextInt(eligible.size)]
-            _currentRandomClient.value = randomClient
-            loadVoiceNotesForClient(randomClient.id)
+            val next = eligible.randomOrNull() ?: pool.first()
+            _currentRandomClient.value = next
+            loadVoiceNotesForClient(next.id)
+        } else {
+            _currentRandomClient.value = null
+            _currentClientVoiceNotes.value = emptyList()
         }
     }
 
     private fun pickRandomClientFromList(list: List<ClientEntity>) {
-        if (list.isEmpty()) return
-        val randomClient = list[Random.nextInt(list.size)]
-        _currentRandomClient.value = randomClient
-        loadVoiceNotesForClient(randomClient.id)
-    }
-
-    fun selectClientForCard(client: ClientEntity) {
-        audioManager.stopPlayback()
-        _currentRandomClient.value = client
-        loadVoiceNotesForClient(client.id)
-        _currentTab.value = AppTab.HOME
+        if (list.isNotEmpty()) {
+            val client = list[Random.nextInt(list.size)]
+            _currentRandomClient.value = client
+            loadVoiceNotesForClient(client.id)
+        }
     }
 
     private fun loadVoiceNotesForClient(clientId: String) {
@@ -234,33 +259,53 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    // Call Action
+    // Call execution & CRM update
     fun callClient(context: Context, client: ClientEntity) {
-        audioManager.stopPlayback()
-        CallHelper.makeCall(context, client.number)
-        onCallMade(client.id)
+        CallHelper.makeDirectCall(context, client.number)
+        recordClientContacted(client.id)
     }
 
-    // WhatsApp Action
+    // WhatsApp execution: check single-choice preference
     fun openWhatsApp(context: Context, client: ClientEntity) {
-        val greeting = "Hi ${client.name}, hope you are doing well! Alexander here from Apex Commercial. Reaching out regarding our ongoing relationship and follow-up."
-        CallHelper.openWhatsApp(context, client.number, greeting)
+        val preferred = _preferredWhatsAppPackage.value
+        if (!preferred.isNullOrBlank()) {
+            CallHelper.openWhatsApp(context, client.number, preferred)
+            recordClientContacted(client.id)
+        } else {
+            _pendingWhatsAppClient.value = client
+        }
     }
 
-    // SMS Action
-    fun sendSms(context: Context, client: ClientEntity) {
-        CallHelper.sendSms(context, client.number)
+    fun selectWhatsAppPreference(context: Context, pkg: String, rememberChoice: Boolean) {
+        if (rememberChoice) {
+            setPreferredWhatsAppPackage(pkg)
+        }
+        val client = _pendingWhatsAppClient.value
+        if (client != null) {
+            CallHelper.openWhatsApp(context, client.number, pkg)
+            recordClientContacted(client.id)
+            _pendingWhatsAppClient.value = null
+        }
     }
 
-    fun onCallMade(clientId: String) {
+    fun dismissWhatsAppPicker() {
+        _pendingWhatsAppClient.value = null
+    }
+
+    // Snooze / Reschedule for 3 days (or custom days)
+    fun snoozeClient(client: ClientEntity, days: Int = 3) {
+        viewModelScope.launch {
+            clientRepo.snoozeClient(client.id, days)
+            pickRandomClient()
+        }
+    }
+
+    fun recordClientContacted(clientId: String) {
         viewModelScope.launch {
             clientRepo.updateLastContacted(clientId, System.currentTimeMillis())
             _userProfile.value = _userProfile.value.copy(
                 callsMadeToday = _userProfile.value.callsMadeToday + 1
             )
-            // Refresh current client with updated timestamp
-            val updated = clientRepo.allClients
-            // Let collection reflect automatically
         }
     }
 
@@ -283,6 +328,11 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun stopRecordingVoiceNote(clientId: String, summary: String = "") {
+        val existingCount = _currentClientVoiceNotes.value.size
+        if (existingCount >= 5) {
+            audioManager.cancelRecording()
+            return
+        }
         val (filePath, duration) = audioManager.stopRecording()
         if (filePath != null) {
             viewModelScope.launch {
@@ -290,9 +340,18 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
                     clientId = clientId,
                     audioFilePath = filePath,
                     durationSeconds = duration,
-                    summary = summary.ifBlank { "Client follow-up note recorded" }
+                    summary = summary.ifBlank { "Client follow-up note #${existingCount + 1}" }
                 )
             }
+        }
+    }
+
+    fun deleteVoiceNote(voiceNoteId: String) {
+        viewModelScope.launch {
+            if (playbackState.value.currentVoiceNoteId == voiceNoteId) {
+                audioManager.stopPlayback()
+            }
+            clientRepo.deleteVoiceNote(voiceNoteId)
         }
     }
 
@@ -313,75 +372,18 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun updatePermissions(hasContacts: Boolean, hasCallLog: Boolean, hasCallPhone: Boolean, hasRecordAudio: Boolean) {
+    fun updatePermissions(hasContacts: Boolean, hasRecordAudio: Boolean) {
         _permissionState.value = PermissionState(
             hasContacts = hasContacts,
-            hasCallLog = hasCallLog,
-            hasCallPhone = hasCallPhone,
             hasRecordAudio = hasRecordAudio
         )
-    }
-
-    fun setTab(tab: AppTab) {
-        if (tab != AppTab.HOME) {
-            audioManager.stopPlayback()
+        if (hasContacts) {
+            syncContactsNow()
         }
-        _currentTab.value = tab
-    }
-
-    fun setProfileSubSection(section: ProfileSubSection) {
-        _profileSubSection.value = section
-    }
-
-    fun updateUserProfile(
-        name: String,
-        title: String,
-        company: String,
-        email: String,
-        phone: String,
-        dailyGoal: Int
-    ) {
-        _userProfile.value = _userProfile.value.copy(
-            name = name,
-            title = title,
-            company = company,
-            email = email,
-            phone = phone,
-            dailyCallGoal = dailyGoal
-        )
-        _profileSubSection.value = ProfileSubSection.OVERVIEW
     }
 
     fun setSearchQuery(query: String) {
         _searchQuery.value = query
-    }
-
-    fun setCallLogFilter(filter: CallType?) {
-        _callLogFilter.value = filter
-    }
-
-    fun toggleInAppDialer(show: Boolean) {
-        _showInAppDialer.value = show
-    }
-
-    fun onDialDigit(char: Char) {
-        if (_dialpadInput.value.length < 20) {
-            _dialpadInput.value += char
-        }
-    }
-
-    fun onDialBackspace() {
-        if (_dialpadInput.value.isNotEmpty()) {
-            _dialpadInput.value = _dialpadInput.value.dropLast(1)
-        }
-    }
-
-    fun onDialClear() {
-        _dialpadInput.value = ""
-    }
-
-    fun setDialpadInput(number: String) {
-        _dialpadInput.value = number
     }
 
     fun completeOnboarding() {
@@ -392,12 +394,12 @@ class CallingViewModel(application: Application) : AndroidViewModel(application)
         _hasCompletedOnboarding.value = false
     }
 
-    fun toggleSettingsSheet(show: Boolean) {
-        _showSettingsSheet.value = show
+    fun openSettingsScreen() {
+        _isSettingsScreenOpen.value = true
     }
 
-    fun setCardAnimationStyle(style: com.example.model.CardAnimationStyle) {
-        _cardAnimationStyle.value = style
+    fun closeSettingsScreen() {
+        _isSettingsScreenOpen.value = false
     }
 
     fun setDailyCallGoal(goal: Int) {
